@@ -1110,9 +1110,23 @@ body {
     <div class="topbar-brand">SHIVA'S <em>Digital Evaluation</em></div>
     <div class="topbar-sep"></div>
     <span style="font-size:11px;color:var(--text3)" id="tb-section">Portal</span>
+    <!-- DB status -->
+    <div id="db-status" style="display:flex;align-items:center;gap:5px;font-size:10px;
+         font-family:'JetBrains Mono',monospace;color:var(--text3);margin-left:4px">
+      <div id="db-dot" style="width:6px;height:6px;border-radius:50%;background:var(--text3)"></div>
+      <span id="db-label">DB</span>
+    </div>
     <div class="topbar-right">
       <span class="topbar-user" id="tb-user"></span>
       <span class="role-pill" id="tb-role"></span>
+      <button onclick="refreshData()" title="Refresh data from database"
+        style="font-size:11px;background:transparent;border:1px solid var(--border2);
+               color:var(--text3);padding:4px 9px;border-radius:6px;cursor:pointer;
+               font-family:'Plus Jakarta Sans',sans-serif;transition:all 0.15s"
+        onmouseover="this.style.borderColor='var(--blue)';this.style.color='var(--blue)'"
+        onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text3)'">
+        ↻ Refresh
+      </button>
       <div class="notif-bell" id="notif-bell" onclick="toggleNotif()">
         🔔
         <div class="notif-badge" id="notif-badge" style="display:none">0</div>
@@ -1151,24 +1165,115 @@ let sidebarSearch = '';
 /* ── Active question block (OR logic) ── */
 let activeQBlock = 'Q1';     // 'Q1' | 'Q2'
 
-/* ── Session persistence helpers ── */
-function saveSession() {
+/* ════════════════════════════════════════
+   PERSISTENT STORAGE — Supabase via Backend
+   All data is loaded from DB on login and
+   saved to DB on every marks change.
+   localStorage is only a fast offline cache.
+════════════════════════════════════════ */
+
+/* ── Save to localStorage as offline cache ── */
+function cacheSession() {
   try {
     localStorage.setItem('sde_evals',    JSON.stringify(EVALS));
     localStorage.setItem('sde_students', JSON.stringify(STUDENTS));
     localStorage.setItem('sde_finalized',JSON.stringify(FINALIZED));
   } catch(e) {}
 }
-function loadSession() {
+
+/* ── Load from localStorage (used only when backend unreachable) ── */
+function loadCachedSession() {
   try {
     const ev = localStorage.getItem('sde_evals');
     const st = localStorage.getItem('sde_students');
     const fi = localStorage.getItem('sde_finalized');
-    if (ev) Object.assign(EVALS,     JSON.parse(ev));
-    if (st) { const arr = JSON.parse(st); arr.forEach(s => { if (!STUDENTS.find(x=>x.id===s.id)) STUDENTS.push(s); else Object.assign(STUDENTS.find(x=>x.id===s.id), s); }); }
+    if (ev) Object.assign(EVALS, JSON.parse(ev));
+    if (st) {
+      const arr = JSON.parse(st);
+      arr.forEach(s => {
+        if (!STUDENTS.find(x => x.id === s.id)) STUDENTS.push(s);
+        else Object.assign(STUDENTS.find(x => x.id === s.id), s);
+      });
+    }
     if (fi) Object.assign(FINALIZED, JSON.parse(fi));
   } catch(e) {}
 }
+
+/* ── Primary: load everything from backend DB ── */
+async function loadAllFromDB(username) {
+  setDbStatus('loading');
+  try {
+    const res = await fetch(`${API}/load-all/${username}`);
+    if (!res.ok) throw new Error('DB load failed');
+    const data = await res.json();
+
+    /* Merge students from DB */
+    if (data.students && data.students.length) {
+      data.students.forEach(s => {
+        const existing = STUDENTS.find(x => x.id === s.id);
+        const entry = { id: s.id, name: s.name, username: s.username, status: s.status };
+        if (existing) Object.assign(existing, entry);
+        else STUDENTS.push(entry);
+      });
+    }
+
+    /* Merge evaluations from DB */
+    if (data.evals) {
+      Object.entries(data.evals).forEach(([sid, ev]) => {
+        EVALS[sid] = EVALS[sid] || { AI:{}, FACULTY:{}, STUDENT:{} };
+        if (ev.AI      && Object.keys(ev.AI).length)      EVALS[sid].AI      = ev.AI;
+        if (ev.FACULTY && Object.keys(ev.FACULTY).length) EVALS[sid].FACULTY = ev.FACULTY;
+        if (ev.STUDENT && Object.keys(ev.STUDENT).length) EVALS[sid].STUDENT = ev.STUDENT;
+      });
+    }
+
+    /* Merge finalized from DB */
+    if (data.finalized) {
+      Object.entries(data.finalized).forEach(([sid, fin]) => { FINALIZED[sid] = fin; });
+    }
+
+    cacheSession();
+    setDbStatus('ok');
+    return true;
+  } catch(e) {
+    console.warn('Backend unreachable — using local cache', e);
+    loadCachedSession();
+    setDbStatus('offline');
+    return false;
+  }
+}
+
+function setDbStatus(state) {
+  const dot   = document.getElementById('db-dot');
+  const label = document.getElementById('db-label');
+  if (!dot || !label) return;
+  if (state === 'ok') {
+    dot.style.background = 'var(--green)'; label.textContent = 'DB Live';
+    label.style.color    = 'var(--green)';
+  } else if (state === 'offline') {
+    dot.style.background = 'var(--amber)'; label.textContent = 'DB Offline';
+    label.style.color    = 'var(--amber)';
+  } else {
+    dot.style.background = 'var(--blue)'; label.textContent = 'Syncing…';
+    label.style.color    = 'var(--blue)';
+    dot.style.animation  = 'pulse 1s infinite';
+  }
+}
+
+async function refreshData() {
+  if (!currentUsername) return;
+  toast('Refreshing from database…', '');
+  setDbStatus('loading');
+  const ok = await loadAllFromDB(currentUsername);
+  if (ok) { toast('Data refreshed ✓', 'ok'); renderView(activeTabIdx); }
+  else    { toast('Database unreachable — showing cached data', 'err'); }
+}
+
+/* ── saveSession: save to DB + update cache ── */
+function saveSession() {
+  cacheSession(); /* DB is updated directly by submit-marks / finalize API calls */
+}
+
 
 
 /* Mock user DB (in real app: from backend) */
@@ -1445,20 +1550,37 @@ function registerUser() {
 /* ════════════════════════════════════════
    APP
 ════════════════════════════════════════ */
-function startApp() {
-  loadSession();   // restore any persisted evals/students
+async function startApp() {
   document.getElementById('tb-user').textContent = currentUser;
   const rEl = document.getElementById('tb-role');
   rEl.textContent = currentRole.toUpperCase();
-  rEl.className = `role-pill role-${currentRole}`;
+  rEl.className   = `role-pill role-${currentRole}`;
 
-  /* If student, lock them to their own record only */
+  /* If student, lock to their own record */
   if (currentRole === 'student') {
     const sid = getStudentIdForUser(currentUsername);
     if (sid) currentStudent = sid;
   }
 
-  /* Welcome notification */
+  showScreen('app');
+
+  /* Show spinner while fetching DB */
+  document.getElementById('main-content').innerHTML = `
+    <div style="flex:1;display:flex;flex-direction:column;align-items:center;
+                justify-content:center;gap:14px;color:var(--text3)">
+      <div style="width:32px;height:32px;border:3px solid var(--border2);
+                  border-top-color:var(--blue);border-radius:50%;
+                  animation:spin 0.8s linear infinite"></div>
+      <div style="font-size:13px;color:var(--text2);font-weight:500">
+        Loading data from database…
+      </div>
+    </div>`;
+  document.getElementById('view-tabs').innerHTML = '';
+
+  /* Load all data from Supabase */
+  const fromDB = await loadAllFromDB(currentUsername);
+
+  /* Notifications after data loaded */
   addNotif(`Welcome back, ${currentUser}!`, 'info');
   if (currentRole === 'hod') {
     const pending = STUDENTS.filter(s => !FINALIZED[s.id]).length;
@@ -1472,10 +1594,10 @@ function startApp() {
   }
   if (currentRole === 'faculty') {
     const ungraded = STUDENTS.filter(s => !(EVALS[s.id]||{}).FACULTY?.total).length;
-    if (ungraded > 0) addNotif(`${ungraded} script${ungraded>1?'s':''} awaiting your marks entry.`, 'warn');
+    if (ungraded > 0) addNotif(`${ungraded} script${ungraded>1?'s':''} awaiting marks entry.`, 'warn');
   }
+  if (!fromDB) addNotif('⚠ Database offline — showing cached data.', 'warn');
 
-  showScreen('app');
   buildTabs();
 }
 
@@ -2681,29 +2803,40 @@ function attachScript(idx, input) {
   renderBulkUploadView();
 }
 
-function commitBulkUpload() {
+async function commitBulkUpload() {
   let added = 0;
+  const toRegister = [];
+
   bulkRows.forEach(r => {
-    /* Register in STUDENTS list */
     if (!STUDENTS.find(s => s.id === r.id)) {
       STUDENTS.push({ id: r.id, name: r.name, status: 'pending', username: r.username });
       added++;
     } else {
-      /* Update name if already exists */
       const s = STUDENTS.find(s => s.id === r.id);
       s.name = r.name; s.username = r.username;
     }
-    /* Register in USER_DB */
     USER_DB[r.username] = { pw: r.password, role: 'student', name: r.name, status: 'approved' };
-    if (!MANAGED_USERS.find(u => u.username === r.username)) {
+    if (!MANAGED_USERS.find(u => u.username === r.username))
       MANAGED_USERS.push({ username: r.username, ...USER_DB[r.username] });
-    }
-    /* Init eval record */
     EVALS[r.id] = EVALS[r.id] || { AI:{}, FACULTY:{}, STUDENT:{} };
+    toRegister.push({ student_id: r.id, name: r.name, username: r.username, password: r.password });
   });
 
+  /* Send to backend DB */
+  try {
+    await fetch(`${API}/students/bulk-register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(toRegister)
+    });
+    toast(`✅ ${bulkRows.length} students registered in database`, 'ok');
+  } catch {
+    toast(`✅ ${bulkRows.length} students registered locally (DB offline)`, 'ok');
+  }
+
   const withScripts = bulkRows.filter(r => r.scriptURL).length;
-  toast(`✅ ${bulkRows.length} students registered, ${withScripts} scripts ready`, 'ok');
+  addNotif(`Bulk upload: ${bulkRows.length} students registered, ${withScripts} scripts ready`, 'info');
+  cacheSession();
   bulkRows = [];
   renderBulkUploadView();
 }
