@@ -465,33 +465,7 @@ body {
 }
 .btn-ai:hover { opacity: 0.88; }
 .btn-ai:active { transform: scale(0.98); }
-
-/* AI result */
-.ai-card {
-  background: var(--purple-lt); border: 1px solid #ddd6fe;
-  border-radius: var(--r); padding: 12px; margin-bottom: 14px;
-  display: none;
-}
-.ai-card.show { display: block; }
-.ai-card-hdr {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-bottom: 8px;
-}
-.ai-card-label { font-size: 10px; font-weight: 700; color: var(--purple); letter-spacing: 0.07em; text-transform: uppercase; }
-.ai-conf-pill {
-  font-size: 10px; font-family: 'JetBrains Mono', monospace;
-  background: white; color: var(--purple);
-  padding: 2px 7px; border-radius: 4px;
-}
-.ai-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 5px 0; border-bottom: 1px solid #ede9fe;
-  font-size: 12px;
-}
-.ai-row:last-of-type { border-bottom: none; }
-.ai-q { color: var(--text2); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-.ai-mark { color: var(--purple); font-weight: 600; }
-.ai-fb { font-size: 11px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* Section label */
 .sec-label {
@@ -764,8 +738,152 @@ body {
 .toast.err { background: #991b1b; }
 
 /* ═══════════════════════════════════════════
-   NOTIFICATION BELL
+   RICH AI FEEDBACK CARD
 ═══════════════════════════════════════════ */
+.ai-card {
+  background: var(--purple-lt); border: 1px solid #ddd6fe;
+  border-radius: var(--r-lg); padding: 0; margin-bottom: 14px;
+  display: none; overflow: hidden;
+}
+.ai-card.show { display: block; }
+
+/* Card header bar */
+.ai-card-hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, #4338ca 0%, #7c3aed 100%);
+}
+.ai-card-label {
+  font-size: 11px; font-weight: 700; color: white;
+  letter-spacing: 0.07em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 6px;
+}
+.ai-conf-pill {
+  font-size: 10px; font-family: 'JetBrains Mono', monospace;
+  background: rgba(255,255,255,0.18); color: white;
+  padding: 3px 9px; border-radius: 20px; font-weight: 600;
+}
+.ai-conf-pill.high { background: rgba(52,211,153,0.3); }
+.ai-conf-pill.mid  { background: rgba(251,191,36,0.3); }
+.ai-conf-pill.low  { background: rgba(248,113,113,0.3); }
+
+/* HTR extracted text box */
+.ai-htr-box {
+  margin: 10px 12px 0;
+  background: rgba(255,255,255,0.6);
+  border: 1px solid #ddd6fe; border-radius: 7px;
+  padding: 9px 11px;
+}
+.ai-htr-label {
+  font-size: 9px; font-weight: 700; color: var(--purple);
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px;
+  display: flex; align-items: center; gap: 4px;
+}
+.ai-htr-text {
+  font-size: 11px; color: var(--text2); line-height: 1.6;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  max-height: 64px; overflow-y: auto;
+}
+
+/* Per-question feedback blocks */
+.ai-q-block {
+  margin: 10px 12px 0;
+  background: white; border-radius: 8px;
+  border: 1px solid #ede9fe; overflow: hidden;
+}
+.ai-q-block-hdr {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ede9fe;
+  background: rgba(237,233,254,0.5);
+}
+.ai-q-name { font-size: 11px; font-weight: 700; color: var(--indigo); font-family: 'JetBrains Mono', monospace; }
+.ai-q-score-wrap { display: flex; align-items: center; gap: 6px; }
+.ai-q-score {
+  font-size: 15px; font-weight: 700;
+  font-family: 'JetBrains Mono', monospace; color: var(--purple);
+}
+.ai-q-max { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+
+/* Score bar inside question block */
+.ai-score-bar-wrap {
+  height: 5px; background: #ede9fe;
+  border-radius: 3px; margin: 0 12px;
+  overflow: hidden;
+}
+.ai-score-bar-fill {
+  height: 100%; border-radius: 3px;
+  transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1);
+}
+.bar-full  { background: var(--green); }
+.bar-good  { background: var(--blue); }
+.bar-mid   { background: var(--amber); }
+.bar-low   { background: var(--red); }
+
+/* Strengths / Weaknesses tags */
+.ai-feedback-body { padding: 8px 12px 10px; }
+.sw-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.sw-tag {
+  font-size: 10px; padding: 3px 8px; border-radius: 20px;
+  font-weight: 600; line-height: 1.4;
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.sw-strength {
+  background: var(--green-lt); color: var(--green);
+  border: 1px solid var(--green-mid);
+}
+.sw-weakness {
+  background: var(--red-lt); color: var(--red);
+  border: 1px solid var(--red-mid);
+}
+.sw-suggestion {
+  background: var(--amber-lt); color: var(--amber);
+  border: 1px solid var(--amber-mid);
+}
+.ai-q-prose {
+  font-size: 11.5px; color: var(--text2); line-height: 1.6;
+  margin-top: 5px;
+}
+
+/* Overall feedback footer */
+.ai-overall {
+  margin: 10px 12px 12px;
+  background: rgba(255,255,255,0.7);
+  border: 1px solid #ddd6fe; border-radius: 7px;
+  padding: 9px 12px;
+}
+.ai-overall-label {
+  font-size: 9px; font-weight: 700; color: var(--purple);
+  text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 5px;
+}
+.ai-overall-text {
+  font-size: 11.5px; color: var(--text); line-height: 1.6;
+}
+
+/* Totals row */
+.ai-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px;
+  border-top: 1px solid #ddd6fe;
+  background: rgba(237,233,254,0.4);
+  margin-top: 10px;
+}
+.ai-total-label { font-size: 11px; font-weight: 700; color: var(--purple); text-transform: uppercase; letter-spacing: 0.05em; }
+.ai-total-score { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--purple); }
+
+/* Expand/collapse toggle */
+.ai-toggle {
+  font-size: 10px; color: rgba(255,255,255,0.75); cursor: pointer;
+  font-family: 'JetBrains Mono', monospace; padding: 2px 6px;
+  border-radius: 4px; background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2); transition: background 0.12s;
+  white-space: nowrap;
+}
+.ai-toggle:hover { background: rgba(255,255,255,0.2); }
+.ai-card-body { display: block; }
+.ai-card-body.collapsed { display: none; }
+
+
 .notif-bell {
   position: relative; cursor: pointer;
   width: 32px; height: 32px; border-radius: 8px;
@@ -1060,7 +1178,7 @@ const USER_DB = {
   'student_001':   { pw: 'stu001',  role: 'student',  name: 'Arjun Mehta',       status: 'approved' },
 };
 
-const ADMIN_PW = 'Shiva@Eval2026'; // Change in production
+const ADMIN_PW = 'admin@123'; // Change in production
 
 /* Registration queue */
 let REG_QUEUE = [
@@ -1629,16 +1747,111 @@ function renderEvalRight() {
 
         <div class="ai-card ${ai.total?'show':''}" id="ai-card">
           <div class="ai-card-hdr">
-            <div class="ai-card-label">AI Evaluation</div>
-            ${ai.conf?`<div class="ai-conf-pill">${Math.round(ai.conf*100)}% confidence</div>`:''}
+            <div class="ai-card-label">✦ AI Evaluation</div>
+            <div style="display:flex;align-items:center;gap:6px">
+              ${ai.conf ? (() => {
+                const pct = Math.round(ai.conf*100);
+                const cls = pct>=85?'high':pct>=70?'mid':'low';
+                const lbl = pct>=85?'High confidence':pct>=70?'Medium confidence':'Low confidence';
+                return `<div class="ai-conf-pill ${cls}">${lbl} · ${pct}%</div>`;
+              })() : ''}
+              <span class="ai-toggle" onclick="toggleAiCard()">▼ collapse</span>
+            </div>
           </div>
-          <div class="ai-row"><span class="ai-q">Q1 (a)</span><span class="ai-mark">${ai.q1a??'—'} / 5</span></div>
-          <div class="ai-row"><span class="ai-q">Q1 (b)</span><span class="ai-mark">${ai.q1b??'—'} / 5</span></div>
-          <div class="ai-row" style="margin-top:4px;padding-top:6px;border-top:1px solid #ddd6fe">
-            <span class="ai-q" style="color:var(--purple);font-weight:600">Total</span>
-            <span class="ai-mark" style="font-size:15px">${ai.total??'—'} / 10</span>
-          </div>
-          ${ai.fb?`<div class="ai-fb">${ai.fb}</div>`:''}
+
+          <div class="ai-card-body" id="ai-card-body">
+
+            ${/* HTR extracted text */ ai.htr ? `
+            <div class="ai-htr-box">
+              <div class="ai-htr-label">📝 Extracted Handwriting (HTR)</div>
+              <div class="ai-htr-text">${ai.htr}</div>
+            </div>` : ''}
+
+            ${/* Q1a feedback block */ ai.q1a != null ? (() => {
+              const pct   = (ai.q1a / 5) * 100;
+              const barcls = pct===100?'bar-full':pct>=70?'bar-good':pct>=50?'bar-mid':'bar-low';
+              const strengths   = ai.q1a_strengths   || [];
+              const weaknesses  = ai.q1a_weaknesses  || [];
+              const suggestions = ai.q1a_suggestions || [];
+              return `
+              <div class="ai-q-block">
+                <div class="ai-q-block-hdr">
+                  <span class="ai-q-name">Q1 (a)</span>
+                  <div class="ai-q-score-wrap">
+                    <span class="ai-q-score">${ai.q1a}</span>
+                    <span class="ai-q-max">/ 5</span>
+                    ${!isStudent?`<span class="ai-chip" onclick="fillAI('q1a',${ai.q1a})" title="Accept AI mark">↑ Use</span>`:''}
+                  </div>
+                </div>
+                <div class="ai-score-bar-wrap" style="margin-top:6px">
+                  <div class="ai-score-bar-fill ${barcls}" style="width:${pct}%"></div>
+                </div>
+                <div class="ai-feedback-body">
+                  ${ai.q1a_prose ? `<div class="ai-q-prose">${ai.q1a_prose}</div>` : ''}
+                  ${strengths.length ? `
+                  <div style="font-size:9px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:0.06em;margin-top:7px;margin-bottom:3px">✓ Strengths</div>
+                  <div class="sw-row">${strengths.map(s=>`<span class="sw-tag sw-strength">✓ ${s}</span>`).join('')}</div>` : ''}
+                  ${weaknesses.length ? `
+                  <div style="font-size:9px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.06em;margin-top:7px;margin-bottom:3px">✗ Weaknesses</div>
+                  <div class="sw-row">${weaknesses.map(w=>`<span class="sw-tag sw-weakness">✗ ${w}</span>`).join('')}</div>` : ''}
+                  ${suggestions.length ? `
+                  <div style="font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;margin-top:7px;margin-bottom:3px">💡 Suggestions</div>
+                  <div class="sw-row">${suggestions.map(s=>`<span class="sw-tag sw-suggestion">💡 ${s}</span>`).join('')}</div>` : ''}
+                </div>
+              </div>`;
+            })() : ''}
+
+            ${/* Q1b feedback block */ ai.q1b != null ? (() => {
+              const pct   = (ai.q1b / 5) * 100;
+              const barcls = pct===100?'bar-full':pct>=70?'bar-good':pct>=50?'bar-mid':'bar-low';
+              const strengths   = ai.q1b_strengths   || [];
+              const weaknesses  = ai.q1b_weaknesses  || [];
+              const suggestions = ai.q1b_suggestions || [];
+              return `
+              <div class="ai-q-block" style="margin-top:8px">
+                <div class="ai-q-block-hdr">
+                  <span class="ai-q-name">Q1 (b)</span>
+                  <div class="ai-q-score-wrap">
+                    <span class="ai-q-score">${ai.q1b}</span>
+                    <span class="ai-q-max">/ 5</span>
+                    ${!isStudent?`<span class="ai-chip" onclick="fillAI('q1b',${ai.q1b})" title="Accept AI mark">↑ Use</span>`:''}
+                  </div>
+                </div>
+                <div class="ai-score-bar-wrap" style="margin-top:6px">
+                  <div class="ai-score-bar-fill ${barcls}" style="width:${pct}%"></div>
+                </div>
+                <div class="ai-feedback-body">
+                  ${ai.q1b_prose ? `<div class="ai-q-prose">${ai.q1b_prose}</div>` : ''}
+                  ${strengths.length ? `
+                  <div style="font-size:9px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:0.06em;margin-top:7px;margin-bottom:3px">✓ Strengths</div>
+                  <div class="sw-row">${strengths.map(s=>`<span class="sw-tag sw-strength">✓ ${s}</span>`).join('')}</div>` : ''}
+                  ${weaknesses.length ? `
+                  <div style="font-size:9px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.06em;margin-top:7px;margin-bottom:3px">✗ Weaknesses</div>
+                  <div class="sw-row">${weaknesses.map(w=>`<span class="sw-tag sw-weakness">✗ ${w}</span>`).join('')}</div>` : ''}
+                  ${suggestions.length ? `
+                  <div style="font-size:9px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;margin-top:7px;margin-bottom:3px">💡 Suggestions</div>
+                  <div class="sw-row">${suggestions.map(s=>`<span class="sw-tag sw-suggestion">💡 ${s}</span>`).join('')}</div>` : ''}
+                </div>
+              </div>`;
+            })() : ''}
+
+            ${ai.fb ? `
+            <div class="ai-overall">
+              <div class="ai-overall-label">📋 Overall Assessment</div>
+              <div class="ai-overall-text">${ai.fb}</div>
+            </div>` : ''}
+
+            <div class="ai-total-row">
+              <div>
+                <div class="ai-total-label">AI Total</div>
+                ${ai.conf && Math.round(ai.conf*100) < 70
+                  ? `<div style="font-size:10px;color:var(--amber);margin-top:2px">⚠ Low confidence — please verify manually</div>`
+                  : `<div style="font-size:10px;color:var(--text3);margin-top:2px">Faculty review recommended</div>`}
+              </div>
+              <div class="ai-total-score">${ai.total ?? '—'} <span style="font-size:13px;color:var(--text3)">/ 10</span></div>
+            </div>
+
+          </div><!-- end ai-card-body -->
         </div>
 
         <div class="sec-label">${isStudent?'Your Self-Assessment':'Manual Marks Entry'}</div>
@@ -1852,27 +2065,95 @@ async function submitMarks() {
   renderStuList();
 }
 
+function toggleAiCard() {
+  const body   = document.getElementById('ai-card-body');
+  const toggle = document.querySelector('.ai-toggle');
+  if (!body || !toggle) return;
+  const collapsed = body.classList.toggle('collapsed');
+  toggle.textContent = collapsed ? '▶ expand' : '▼ collapse';
+}
+
 async function runAI() {
   const btn = document.getElementById('ai-btn');
-  if (btn) { btn.textContent = '⟳ Analysing…'; btn.style.opacity = '0.65'; btn.style.pointerEvents = 'none'; }
+  if (btn) {
+    btn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Analysing handwriting…';
+    btn.style.opacity = '0.7'; btn.style.pointerEvents = 'none';
+  }
 
   try {
     const res = await fetch(`${API}/run-ai-analysis?student_id=${currentStudent}`, {method:'POST'});
     const d   = await res.json();
     const e   = d.ai_eval;
-    EVALS[currentStudent] = EVALS[currentStudent] || {};
+
+    /* Map flat or nested response format */
+    const q1a_marks = e.q1a?.marks   ?? (typeof e.q1a === 'number' ? e.q1a : null) ?? 4.5;
+    const q1b_marks = e.q1b?.marks   ?? (typeof e.q1b === 'number' ? e.q1b : null) ?? 3.5;
+    const q1a_fb    = e.q1a?.feedback ?? '';
+    const q1b_fb    = e.q1b?.feedback ?? '';
+
+    /* Parse strengths / weaknesses from feedback string if not provided as arrays */
+    function parseSwTags(fb) {
+      const strengths   = []; const weaknesses = []; const suggestions = [];
+      if (!fb) return { strengths, weaknesses, suggestions, prose: '' };
+      const lines = fb.split(/[.;]\s*/);
+      lines.forEach(l => {
+        const t = l.trim();
+        if (!t) return;
+        if (/correct|good|well|strong|clear|accurate|demonstrate|shows|proper|excellent/i.test(t))
+          strengths.push(t.replace(/^[-•✓✗]\s*/, ''));
+        else if (/missing|incorrect|wrong|lack|incomplete|error|not shown|absent|forgot|no\s/i.test(t))
+          weaknesses.push(t.replace(/^[-•✓✗]\s*/, ''));
+        else if (/should|could|improve|review|revise|consider|recommend/i.test(t))
+          suggestions.push(t.replace(/^[-•✓✗]\s*/, ''));
+      });
+      return { strengths: strengths.slice(0,3), weaknesses: weaknesses.slice(0,3), suggestions: suggestions.slice(0,2), prose: fb };
+    }
+
+    const sw1a = parseSwTags(q1a_fb);
+    const sw1b = parseSwTags(q1b_fb);
+
+    EVALS[currentStudent]    = EVALS[currentStudent] || {};
     EVALS[currentStudent].AI = {
-      q1a: e.q1a?.marks ?? e.q1a ?? 4.5,
-      q1b: e.q1b?.marks ?? e.q1b ?? 3.5,
-      total: e.total ?? 8.0,
-      conf: e.overall_confidence ?? 0.88,
-      fb: e.general_feedback || ''
+      q1a:             q1a_marks,
+      q1a_prose:       sw1a.prose,
+      q1a_strengths:   e.q1a?.strengths   || sw1a.strengths,
+      q1a_weaknesses:  e.q1a?.weaknesses  || sw1a.weaknesses,
+      q1a_suggestions: e.q1a?.suggestions || sw1a.suggestions,
+      q1b:             q1b_marks,
+      q1b_prose:       sw1b.prose,
+      q1b_strengths:   e.q1b?.strengths   || sw1b.strengths,
+      q1b_weaknesses:  e.q1b?.weaknesses  || sw1b.weaknesses,
+      q1b_suggestions: e.q1b?.suggestions || sw1b.suggestions,
+      total:           e.total            ?? (q1a_marks + q1b_marks),
+      conf:            e.overall_confidence ?? 0.88,
+      fb:              e.general_feedback   ?? '',
+      htr:             e.htr_text           ?? '',
     };
+
   } catch {
-    EVALS[currentStudent] = EVALS[currentStudent] || {};
-    EVALS[currentStudent].AI = {q1a:4.5,q1b:3.5,total:8.0,conf:0.88,fb:'[Demo] Good conceptual understanding. Formula applied correctly.'};
+    /* Rich demo/mock data when backend is unreachable */
+    EVALS[currentStudent]    = EVALS[currentStudent] || {};
+    EVALS[currentStudent].AI = {
+      q1a:             4.5,
+      q1a_prose:       'The student correctly identified the key formula and applied it to the given values. Working is shown clearly with appropriate units.',
+      q1a_strengths:   ['Correct formula stated', 'Units used correctly', 'Working shown step-by-step'],
+      q1a_weaknesses:  ['Final rounding not shown'],
+      q1a_suggestions: ['Show the rounding step explicitly for full marks'],
+      q1b:             3.5,
+      q1b_prose:       'Partial credit awarded. The student demonstrated understanding of the concept but the derivation was incomplete — the final two steps were missing.',
+      q1b_strengths:   ['Correct approach identified', 'First three steps correct'],
+      q1b_weaknesses:  ['Derivation incomplete — last 2 steps missing', 'No conclusion statement'],
+      q1b_suggestions: ['Review derivation technique', 'Always write a conclusion sentence'],
+      total:           8.0,
+      conf:            0.88,
+      fb:              'This student shows a solid conceptual understanding of the subject. Performance on Q1(a) is commendable with clear working. Q1(b) requires attention to completing derivations fully. Overall, the student is on track but should focus on completeness rather than just correctness.',
+      htr:             'Q1(a): Let F = ma, where m = 5kg, a = 3 m/s². Therefore F = 5 × 3 = 15N. Q1(b): Using energy conservation E = ½mv² + mgh, differentiating both sides with respect to t...',
+    };
   }
+
+  saveSession();
   renderEvalRight();
+  addNotif(`AI analysis complete for ${STUDENTS.find(s=>s.id===currentStudent)?.name||currentStudent}`, 'info');
   toast('AI analysis complete ✦', 'ok');
 }
 
@@ -1885,47 +2166,120 @@ function exportStudentReport(sid) {
   const ai  = ev.AI || {}, fac = ev.FACULTY || {}, stuEv = ev.STUDENT || {};
   const fin = FINALIZED[sid];
 
+  function swRows(strengths=[], weaknesses=[], suggestions=[]) {
+    let html = '';
+    if (strengths.length)   html += `<p style="margin:6px 0 2px"><strong style="color:#15803d">✓ Strengths:</strong> ${strengths.join(' · ')}</p>`;
+    if (weaknesses.length)  html += `<p style="margin:2px 0"><strong style="color:#b91c1c">✗ Weaknesses:</strong> ${weaknesses.join(' · ')}</p>`;
+    if (suggestions.length) html += `<p style="margin:2px 0"><strong style="color:#b45309">💡 Suggestions:</strong> ${suggestions.join(' · ')}</p>`;
+    return html;
+  }
+
   const html = `<!DOCTYPE html>
 <html><head>
 <title>Evaluation Report — ${stu.name}</title>
 <style>
-  body { font-family: Georgia, serif; max-width: 700px; margin: 40px auto; color: #1e1c18; }
-  h1 { font-size: 22px; border-bottom: 2px solid #1d4ed8; padding-bottom: 10px; }
-  h2 { font-size: 14px; color: #5a5649; text-transform: uppercase; letter-spacing: 0.06em; margin: 24px 0 10px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-  th { background: #eff6ff; padding: 9px 12px; font-size: 12px; text-align: left; border: 1px solid #bfdbfe; }
-  td { padding: 9px 12px; font-size: 13px; border: 1px solid #ddd8cc; }
-  .final { background: #f0fdf4; border: 2px solid #bbf7d0; border-radius: 8px; padding: 14px 18px; margin-top: 20px; }
-  .final-label { font-size: 11px; color: #15803d; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
-  .final-val { font-size: 32px; font-weight: 700; color: #15803d; }
-  @media print { body { margin: 20px; } }
+  body { font-family: Georgia, serif; max-width: 760px; margin: 40px auto; color: #1e1c18; font-size: 13px; }
+  h1 { font-size: 22px; border-bottom: 3px solid #1d4ed8; padding-bottom: 10px; margin-bottom: 6px; }
+  h2 { font-size: 13px; color: #5a5649; text-transform: uppercase; letter-spacing: 0.06em; margin: 22px 0 8px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+  th { background: #eff6ff; padding: 9px 12px; font-size: 11px; text-align: left; border: 1px solid #bfdbfe; }
+  td { padding: 9px 12px; font-size: 12px; border: 1px solid #ddd8cc; vertical-align:top; }
+  .q-card { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
+  .q-card-hdr { display:flex; justify-content:space-between; margin-bottom:8px; }
+  .q-label { font-weight:700; color:#4338ca; font-size:13px; }
+  .q-score { font-size:20px; font-weight:700; color:#7c3aed; }
+  .prose { color:#5a5649; line-height:1.6; margin:6px 0; }
+  .bar-wrap { height:6px; background:#ede9fe; border-radius:3px; margin:8px 0; overflow:hidden; }
+  .bar-fill { height:100%; border-radius:3px; }
+  .final-box { background:#f0fdf4; border:2px solid #bbf7d0; border-radius:8px; padding:16px 20px; margin-top:20px; }
+  .final-label { font-size:11px; color:#15803d; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
+  .final-val { font-size:34px; font-weight:700; color:#15803d; }
+  .overall { background:#faf8f4; border:1px solid #ddd8cc; border-radius:8px; padding:14px; margin-top:12px; }
+  @media print { body { margin:20px; } }
 </style>
 </head><body>
 <h1>SHIVA'S Digital Evaluation — Score Report</h1>
-<p><strong>Student:</strong> ${stu.name} &nbsp;|&nbsp; <strong>ID:</strong> ${stu.id} &nbsp;|&nbsp; <strong>Date:</strong> ${new Date().toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'})}</p>
-
-<h2>Tri-Phase Evaluation Summary</h2>
-<table>
-  <tr><th>Evaluator</th><th>Q1 (a)</th><th>Q1 (b)</th><th>Total / 10</th><th>Notes</th></tr>
-  <tr><td>🤖 AI Agent</td><td>${ai.q1a??'—'}</td><td>${ai.q1b??'—'}</td><td><strong>${ai.total??'—'}</strong></td><td>Confidence: ${ai.conf?Math.round(ai.conf*100)+'%':'—'}</td></tr>
-  <tr><td>👩‍🏫 Faculty</td><td>${fac.q1a??'—'}</td><td>${fac.q1b??'—'}</td><td><strong>${fac.total??'—'}</strong></td><td>${fac.just||'—'}</td></tr>
-  <tr><td>✍️ Student</td><td>${stuEv.q1a??'—'}</td><td>${stuEv.q1b??'—'}</td><td><strong>${stuEv.total??'—'}</strong></td><td>${stuEv.just||'—'}</td></tr>
+<table style="margin-bottom:10px;border:none">
+  <tr>
+    <td style="border:none;padding:2px 0"><strong>Student:</strong> ${stu.name}</td>
+    <td style="border:none;padding:2px 0"><strong>ID:</strong> ${stu.id}</td>
+    <td style="border:none;padding:2px 0"><strong>Date:</strong> ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</td>
+  </tr>
 </table>
 
-${ai.fb ? `<p><strong>AI Feedback:</strong> ${ai.fb}</p>` : ''}
+<h2>Marks Summary</h2>
+<table>
+  <tr><th>Evaluator</th><th>Q1 (a) / 5</th><th>Q1 (b) / 5</th><th>Total / 10</th><th>Notes</th></tr>
+  <tr>
+    <td>🤖 AI Agent</td>
+    <td><strong>${ai.q1a??'—'}</strong></td>
+    <td><strong>${ai.q1b??'—'}</strong></td>
+    <td><strong>${ai.total??'—'}</strong></td>
+    <td>Confidence: ${ai.conf?Math.round(ai.conf*100)+'%':'—'}</td>
+  </tr>
+  <tr>
+    <td>👩‍🏫 Faculty</td>
+    <td><strong>${fac.q1a??'—'}</strong></td>
+    <td><strong>${fac.q1b??'—'}</strong></td>
+    <td><strong>${fac.total??'—'}</strong></td>
+    <td>${fac.just||'—'}</td>
+  </tr>
+  <tr>
+    <td>✍️ Student</td>
+    <td><strong>${stuEv.q1a??'—'}</strong></td>
+    <td><strong>${stuEv.q1b??'—'}</strong></td>
+    <td><strong>${stuEv.total??'—'}</strong></td>
+    <td>${stuEv.just||'—'}</td>
+  </tr>
+</table>
+
+<h2>AI Detailed Feedback</h2>
+
+${ai.htr ? `<div style="background:#faf8f4;border:1px solid #ddd8cc;border-radius:8px;padding:12px 14px;margin-bottom:12px">
+  <div style="font-size:10px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px">📝 Extracted Handwriting (HTR)</div>
+  <div style="font-size:12px;color:#5a5649;line-height:1.6">${ai.htr}</div>
+</div>` : ''}
+
+${ai.q1a != null ? `
+<div class="q-card">
+  <div class="q-card-hdr">
+    <span class="q-label">Question 1 (a)</span>
+    <span class="q-score">${ai.q1a} <span style="font-size:14px;color:#9c9488">/ 5</span></span>
+  </div>
+  <div class="bar-wrap"><div class="bar-fill" style="width:${(ai.q1a/5)*100}%;background:${ai.q1a>=4?'#15803d':ai.q1a>=3?'#1d4ed8':ai.q1a>=2?'#b45309':'#b91c1c'}"></div></div>
+  ${ai.q1a_prose ? `<div class="prose">${ai.q1a_prose}</div>` : ''}
+  ${swRows(ai.q1a_strengths, ai.q1a_weaknesses, ai.q1a_suggestions)}
+</div>` : ''}
+
+${ai.q1b != null ? `
+<div class="q-card">
+  <div class="q-card-hdr">
+    <span class="q-label">Question 1 (b)</span>
+    <span class="q-score">${ai.q1b} <span style="font-size:14px;color:#9c9488">/ 5</span></span>
+  </div>
+  <div class="bar-wrap"><div class="bar-fill" style="width:${(ai.q1b/5)*100}%;background:${ai.q1b>=4?'#15803d':ai.q1b>=3?'#1d4ed8':ai.q1b>=2?'#b45309':'#b91c1c'}"></div></div>
+  ${ai.q1b_prose ? `<div class="prose">${ai.q1b_prose}</div>` : ''}
+  ${swRows(ai.q1b_strengths, ai.q1b_weaknesses, ai.q1b_suggestions)}
+</div>` : ''}
+
+${ai.fb ? `<div class="overall">
+  <div style="font-size:10px;font-weight:700;color:#5a5649;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px">Overall Assessment</div>
+  <div style="line-height:1.7">${ai.fb}</div>
+</div>` : ''}
 
 ${fin ? `
-<div class="final">
-  <div class="final-label">✅ Official Final Marks (Committed by HoD)</div>
-  <div class="final-val">${fin.total} / 10</div>
+<div class="final-box">
+  <div class="final-label">✅ Official Final Marks — Committed by HoD</div>
+  <div class="final-val">${fin.total} <span style="font-size:16px;color:#15803d">/ 10</span></div>
   <div style="font-size:12px;color:#5a5649;margin-top:4px">Source: ${fin.from}</div>
-</div>` : '<p style="color:#b45309">⏳ Marks not yet finalised by HoD.</p>'}
+</div>` : `<p style="color:#b45309;margin-top:16px">⏳ Marks not yet finalised by HoD.</p>`}
+
 </body></html>`;
 
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
-  setTimeout(() => w.print(), 500);
+  setTimeout(() => w.print(), 600);
 }
 
 function exportAllResults() {

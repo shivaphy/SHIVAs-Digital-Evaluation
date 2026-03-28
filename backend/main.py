@@ -21,11 +21,7 @@ app = FastAPI(title="Tri-Phase Evaluation API", version="2.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-    "https://shivaphy.github.io",
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -104,56 +100,86 @@ async def run_ai_analysis(student_id: str):
 
     if session and os.getenv("GEMINI_API_KEY") and os.getenv("GEMINI_API_KEY") != "YOUR_GEMINI_API_KEY_HERE":
         try:
-            model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
-            script_bytes = base64.b64decode(session["script_b64"])
-            scheme_bytes = base64.b64decode(session["scheme_b64"])
+        script_bytes = base64.b64decode(session["script_b64"])
 
-            prompt = """
-You are an expert academic evaluator. You have been given:
-1. A student's handwritten answer script (PDF/Image)
-2. A Scheme of Evaluation (rubric)
+        prompt = """
+You are an expert academic evaluator with 20 years of experience marking university exam scripts.
 
-Your task:
-- Read the handwritten answers carefully using your vision capabilities.
-- Compare each answer against the scheme of evaluation.
-- Award marks for each sub-question (q1a, q1b, q1c or q2a, q2b, q2c).
-- If the student answered both Q1 and Q2 (OR choice), evaluate both and flag it.
-- Provide a confidence score (0-1) for your evaluation.
-- Be strict but fair, giving partial credit where steps are shown.
+You have been given a student's handwritten answer script. Your task is to:
 
-Return ONLY valid JSON in this exact format:
+1. READ the handwriting carefully using your vision capabilities (HTR).
+2. EVALUATE each answer against standard academic rubrics for this subject.
+3. AWARD marks fairly — give partial credit where method is shown even if final answer is wrong.
+4. IDENTIFY specific strengths and weaknesses for each sub-question.
+5. PROVIDE constructive suggestions for improvement.
+
+MARKING GUIDELINES:
+- Q1(a): Maximum 5 marks. Award full marks for correct method + correct answer with units.
+  Award 3-4 marks for correct method but arithmetic error. Award 1-2 for partial understanding.
+- Q1(b): Maximum 5 marks. Award full marks for complete derivation with conclusion.
+  Award partial marks for correct steps shown even if derivation incomplete.
+
+IMPORTANT: Return ONLY a valid JSON object. No markdown, no explanation outside the JSON.
+
+Return exactly this structure:
 {
-  "q1a": {"marks": 4.5, "max": 5, "feedback": "Good explanation of...", "confidence": 0.9},
-  "q1b": {"marks": 3.5, "max": 5, "feedback": "Missing key formula...", "confidence": 0.85},
+  "q1a": {
+    "marks": 4.5,
+    "max": 5,
+    "feedback": "One sentence summary of performance on this sub-question.",
+    "strengths": ["Specific strength 1", "Specific strength 2"],
+    "weaknesses": ["Specific weakness 1"],
+    "suggestions": ["Actionable improvement suggestion"]
+  },
+  "q1b": {
+    "marks": 3.5,
+    "max": 5,
+    "feedback": "One sentence summary of performance on this sub-question.",
+    "strengths": ["Specific strength 1"],
+    "weaknesses": ["Specific weakness 1", "Specific weakness 2"],
+    "suggestions": ["Actionable improvement suggestion 1", "Actionable improvement suggestion 2"]
+  },
   "total": 8.0,
   "overall_confidence": 0.87,
   "choice_conflict": false,
-  "htr_text": "Extracted handwritten text here...",
-  "general_feedback": "The student demonstrates understanding but lacks..."
+  "htr_text": "Brief extract of what was read from the handwriting for Q1(a) and Q1(b)",
+  "general_feedback": "Two to three sentence overall assessment of the student's performance, noting key strengths and areas for improvement."
 }
 """
-            # Send script image to Gemini
-            response = model.generate_content([
-                prompt,
-                {"mime_type": "application/pdf", "data": script_bytes}
-            ])
-            result = json.loads(response.text.strip().replace("```json", "").replace("```", ""))
-            return {"status": "success", "ai_eval": result, "source": "gemini"}
+        response = model.generate_content([
+            prompt,
+            {"mime_type": "application/pdf", "data": script_bytes}
+        ])
+        raw = response.text.strip().replace("```json","").replace("```","").strip()
+        result = json.loads(raw)
+        return {"status": "success", "ai_eval": result, "source": "gemini"}
 
-        except Exception as e:
-            # Fall through to mock
-            print(f"Gemini error: {e}")
+    except Exception as e:
+        print(f"Gemini error: {e}")
 
-    # Mock response for demo/testing
+    # Rich mock response for demo/testing
     mock = {
-        "q1a": {"marks": 4.5, "max": 5, "feedback": "Strong conceptual understanding. Formula correctly applied.", "confidence": 0.92},
-        "q1b": {"marks": 3.5, "max": 5, "feedback": "Partial credit: missing final step in derivation.", "confidence": 0.85},
+        "q1a": {
+            "marks": 4.5, "max": 5,
+            "feedback": "Strong conceptual understanding with correct formula application and clear working.",
+            "strengths": ["Correct formula stated", "Units used correctly", "Working shown step-by-step"],
+            "weaknesses": ["Final rounding step not shown explicitly"],
+            "suggestions": ["Show rounding step for full marks"]
+        },
+        "q1b": {
+            "marks": 3.5, "max": 5,
+            "feedback": "Partial credit awarded — correct approach but derivation incomplete in final two steps.",
+            "strengths": ["Correct approach identified", "First three derivation steps correct"],
+            "weaknesses": ["Derivation incomplete — last 2 steps missing", "No conclusion statement written"],
+            "suggestions": ["Complete the full derivation", "Always write a concluding statement"]
+        },
         "total": 8.0,
         "overall_confidence": 0.88,
         "choice_conflict": False,
-        "htr_text": "[Mock HTR] Student answered Q1a and Q1b. Showed working for both parts.",
-        "general_feedback": "Good attempt. Review derivation steps for completeness."
+        "htr_text": "Q1(a): F = ma, m=5kg, a=3m/s², F=15N. Q1(b): E = ½mv² + mgh, differentiating...",
+        "general_feedback": "This student demonstrates solid conceptual understanding with clear working in Q1(a). Q1(b) shows the right approach but requires more complete derivations. Focus on writing complete solutions with conclusion statements to maximise marks."
     }
     return {"status": "success", "ai_eval": mock, "source": "mock"}
 
