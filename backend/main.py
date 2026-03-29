@@ -580,7 +580,8 @@ async def load_all(username: str):
             all_finals[sid] = {"from": fin["selected_evaluator"],
                                "total": fm.get("total") if isinstance(fm,dict) else fm}
 
-    return {"students": students_list, "evals": all_evals, "finalized": all_finals}
+    return {"students": students_list, "evals": all_evals, "finalized": all_finals,
+            "users": [], "pending_users": []}
 
 # ═══════════════════════════════════════
 # COMPARISON + FINALIZE
@@ -662,6 +663,17 @@ async def delete_user(username: str):
 async def update_status(username: str, new_status: str):
     db_exec("UPDATE users SET status=%s WHERE username=%s", (new_status, username))
     return {"status": "updated"}
+
+@app.post("/audit")
+async def post_audit(payload: dict):
+    """Receive audit log entry from frontend."""
+    audit(
+        payload.get("action",""),
+        payload.get("student_id",""),
+        payload.get("performed_by",""),
+        payload.get("details",{})
+    )
+    return {"status": "logged"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))

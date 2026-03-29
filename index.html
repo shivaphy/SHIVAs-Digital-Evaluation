@@ -1231,7 +1231,7 @@ body {
         <div id="admin-content"></div>
       </div>
       <div style="padding:0 28px 20px">
-        <button class="admin-back" onclick="showLogin()">← Exit Admin Portal</button>
+        <button class="admin-back" onclick="exitAdminPortal()">← Exit Admin Portal</button>
       </div>
     </div>
   </div>
@@ -1345,6 +1345,9 @@ function cacheSession() {
     localStorage.setItem('sde_evals',    JSON.stringify(EVALS));
     localStorage.setItem('sde_students', JSON.stringify(STUDENTS));
     localStorage.setItem('sde_finalized',JSON.stringify(FINALIZED));
+    /* ── Also persist admin user data ── */
+    localStorage.setItem('sde_managed_users', JSON.stringify(MANAGED_USERS));
+    localStorage.setItem('sde_reg_queue',     JSON.stringify(REG_QUEUE));
   } catch(e) {}
 }
 
@@ -1354,6 +1357,9 @@ function loadCachedSession() {
     const ev = localStorage.getItem('sde_evals');
     const st = localStorage.getItem('sde_students');
     const fi = localStorage.getItem('sde_finalized');
+    const mu = localStorage.getItem('sde_managed_users');
+    const rq = localStorage.getItem('sde_reg_queue');
+
     if (ev) Object.assign(EVALS, JSON.parse(ev));
     if (st) {
       const arr = JSON.parse(st);
@@ -1363,6 +1369,29 @@ function loadCachedSession() {
       });
     }
     if (fi) Object.assign(FINALIZED, JSON.parse(fi));
+
+    /* Restore admin user lists */
+    if (mu) {
+      const arr = JSON.parse(mu);
+      arr.forEach(u => {
+        if (!MANAGED_USERS.find(x => x.username === u.username)) {
+          MANAGED_USERS.push(u);
+          /* Also restore to LOCAL_USERS for login fallback */
+          if (!LOCAL_USERS[u.username]) {
+            LOCAL_USERS[u.username] = { pw: u.pw || 'changeme123', role: u.role, name: u.name, status: u.status };
+          }
+        } else {
+          Object.assign(MANAGED_USERS.find(x => x.username === u.username), u);
+        }
+      });
+    }
+    if (rq) {
+      const arr = JSON.parse(rq);
+      arr.forEach(u => {
+        if (!REG_QUEUE.find(x => x.username === u.username)) REG_QUEUE.push(u);
+        else Object.assign(REG_QUEUE.find(x => x.username === u.username), u);
+      });
+    }
   } catch(e) {}
 }
 
@@ -1402,6 +1431,34 @@ async function loadAllFromDB(username) {
     /* Merge finalized */
     if (data.finalized) {
       Object.entries(data.finalized).forEach(([sid, fin]) => { FINALIZED[sid] = fin; });
+    }
+
+    /* Merge users from DB into MANAGED_USERS and LOCAL_USERS */
+    if (data.users && data.users.length) {
+      data.users.forEach(u => {
+        /* Update MANAGED_USERS */
+        const existing = MANAGED_USERS.find(x => x.username === u.username);
+        const entry = { username: u.username, name: u.full_name || u.name, role: u.role, status: u.status, pw: u.password || '' };
+        if (existing) Object.assign(existing, entry);
+        else MANAGED_USERS.push(entry);
+        /* Update LOCAL_USERS for offline login */
+        if (!LOCAL_USERS[u.username]) {
+          LOCAL_USERS[u.username] = { pw: 'changeme123', role: u.role, name: u.full_name || u.name, status: u.status };
+        } else {
+          LOCAL_USERS[u.username].status = u.status;
+          LOCAL_USERS[u.username].role   = u.role;
+          LOCAL_USERS[u.username].name   = u.full_name || u.name;
+        }
+      });
+    }
+
+    /* Merge pending registration queue */
+    if (data.pending_users && data.pending_users.length) {
+      data.pending_users.forEach(u => {
+        if (!REG_QUEUE.find(x => x.username === u.username)) {
+          REG_QUEUE.push({ username: u.username, name: u.full_name, role: u.role, status: 'pending', email: u.email || '' });
+        }
+      });
     }
 
     cacheSession();
@@ -1648,13 +1705,60 @@ async function doSelfRegister() {
    ADMIN PORTAL
 ════════════════════════════════════════ */
 let adminTab0 = 0;
-function verifyAdmin() {
+async function verifyAdmin() {
   const pw = document.getElementById('admin-pw').value;
   if (pw !== ADMIN_PW) { toast('Incorrect admin password', 'err'); return; }
   document.getElementById('admin-auth-overlay').style.display = 'none';
-  document.getElementById('admin-panel').style.display = 'flex';
+  document.getElementById('admin-panel').style.display       = 'flex';
   document.getElementById('admin-panel').style.flexDirection = 'column';
+
+  /* Show loading state in admin content */
+  const el = document.getElementById('admin-content');
+  if (el) el.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">
+    <div style="width:20px;height:20px;border:2px solid var(--border2);border-top-color:var(--blue);
+                border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 8px"></div>
+    Loading latest user data…
+  </div>`;
+
+  /* Fetch fresh user list from backend */
+  try {
+    const res = await fetch(`${API}/users`);
+    if (res.ok) {
+      const users = await res.json();
+      /* Rebuild MANAGED_USERS from DB */
+      users.forEach(u => {
+        const entry = { username: u.username, name: u.full_name || u.name, role: u.role, status: u.status, pw: '' };
+        const existing = MANAGED_USERS.find(x => x.username === u.username);
+        if (existing) Object.assign(existing, entry);
+        else MANAGED_USERS.push(entry);
+        /* Keep LOCAL_USERS in sync for offline login */
+        if (!LOCAL_USERS[u.username]) {
+          LOCAL_USERS[u.username] = { pw: 'changeme123', role: u.role, name: entry.name, status: u.status };
+        } else {
+          LOCAL_USERS[u.username].status = u.status;
+          LOCAL_USERS[u.username].name   = entry.name;
+        }
+      });
+      /* Also fetch pending registrations */
+      const pendingUsers = users.filter(u => u.status === 'pending');
+      pendingUsers.forEach(u => {
+        if (!REG_QUEUE.find(x => x.username === u.username)) {
+          REG_QUEUE.push({ username: u.username, name: u.full_name || u.name,
+                           role: u.role, status: 'pending', email: u.email || '' });
+        }
+      });
+      cacheSession();
+    }
+  } catch { /* Offline — use cached data */ }
+
   renderAdminTab(0);
+}
+function exitAdminPortal() {
+  /* Hide panel, show auth overlay again for next time */
+  document.getElementById('admin-panel').style.display = 'none';
+  document.getElementById('admin-auth-overlay').style.display = 'flex';
+  document.getElementById('admin-pw').value = '';
+  showLogin();
 }
 document.getElementById('admin-pw').addEventListener('keydown', e => e.key === 'Enter' && verifyAdmin());
 
@@ -1735,45 +1839,108 @@ function renderRegisterForm() {
     <div style="font-size:11px;color:var(--text3)">Users registered here are immediately approved and can sign in.</div>`;
 }
 
-function approveUser(un) {
+async function approveUser(un) {
   const u = REG_QUEUE.find(x => x.username === un);
   if (!u) return;
   u.status = 'approved';
-  USER_DB[un] = { pw: 'changeme123', role: u.role, name: u.name, status: 'approved' };
-  MANAGED_USERS.push({username:un,...USER_DB[un]});
+
+  /* Add to managed users if not already there */
+  if (!MANAGED_USERS.find(x => x.username === un)) {
+    const entry = { username: un, pw: 'changeme123', role: u.role, name: u.name, status: 'approved' };
+    MANAGED_USERS.push(entry);
+    LOCAL_USERS[un] = { ...entry };
+    USER_DB[un]     = { ...entry };
+  } else {
+    const m = MANAGED_USERS.find(x => x.username === un);
+    m.status = 'approved';
+    if (LOCAL_USERS[un]) LOCAL_USERS[un].status = 'approved';
+  }
+
+  /* Persist to backend */
+  try {
+    await fetch(`${API}/users/${un}/status?new_status=approved`, { method:'PATCH' });
+  } catch {}
+
+  cacheSession();
   toast(`✅ ${u.name} approved`, 'ok');
   renderAdminTab(0);
 }
-function rejectUser(un) {
+
+async function rejectUser(un) {
   const idx = REG_QUEUE.findIndex(x => x.username === un);
-  if (idx > -1) { REG_QUEUE[idx].status = 'rejected'; }
+  if (idx > -1) REG_QUEUE[idx].status = 'rejected';
+
+  try {
+    await fetch(`${API}/users/${un}/status?new_status=rejected`, { method:'PATCH' });
+  } catch {}
+
+  cacheSession();
   toast('User rejected', 'err');
   renderAdminTab(0);
 }
-function resetPw(un) {
+
+async function resetPw(un) {
   const np = prompt(`Set new password for "${un}":`);
   if (!np) return;
-  if (USER_DB[un]) USER_DB[un].pw = np;
+  if (USER_DB[un])      USER_DB[un].pw = np;
+  if (LOCAL_USERS[un])  LOCAL_USERS[un].pw = np;
+  const m = MANAGED_USERS.find(u => u.username === un);
+  if (m) m.pw = np;
+
+  try {
+    await fetch(`${API}/users/reset-password?username=${encodeURIComponent(un)}&new_password=${encodeURIComponent(np)}`, { method:'POST' });
+  } catch {}
+
+  cacheSession();
   toast(`🔑 Password reset for ${un}`, 'ok');
 }
-function deleteUser(un) {
+
+async function deleteUser(un) {
   if (!confirm(`Remove user "${un}"? This cannot be undone.`)) return;
   MANAGED_USERS = MANAGED_USERS.filter(u => u.username !== un);
   delete USER_DB[un];
+  delete LOCAL_USERS[un];
+
+  try {
+    await fetch(`${API}/users/${encodeURIComponent(un)}`, { method:'DELETE' });
+  } catch {}
+
+  cacheSession();
   toast('User removed', 'err');
   renderAdminTab(1);
 }
-function registerUser() {
+
+async function registerUser() {
   const name  = document.getElementById('reg-name').value.trim();
-  const uname = document.getElementById('reg-user').value.trim();
+  const uname = document.getElementById('reg-user').value.trim().toLowerCase().replace(/\s+/g,'_');
   const email = document.getElementById('reg-email').value.trim();
   const role  = document.getElementById('reg-role').value;
   const pw    = document.getElementById('reg-pw').value;
-  if (!name || !uname || !pw) { toast('Please fill all fields', 'err'); return; }
-  if (USER_DB[uname]) { toast('Username already exists', 'err'); return; }
-  USER_DB[uname] = { pw, role, name, status: 'approved' };
-  MANAGED_USERS.push({ username: uname, pw, role, name, status: 'approved' });
+
+  if (!name || !uname || !pw) { toast('Please fill all required fields', 'err'); return; }
+  if (MANAGED_USERS.find(u => u.username === uname)) { toast('Username already exists', 'err'); return; }
+
+  const newUser = { username: uname, pw, role, name, email, status: 'approved' };
+  USER_DB[uname]    = { ...newUser };
+  LOCAL_USERS[uname]= { ...newUser };
+  MANAGED_USERS.push(newUser);
+
+  /* Save to backend */
+  try {
+    await fetch(`${API}/users/register`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ username: uname, password: pw, full_name: name, role, email })
+    });
+  } catch {}
+
+  cacheSession();
   toast(`✅ ${name} registered successfully`, 'ok');
+  /* Clear the form */
+  ['reg-name','reg-user','reg-email','reg-pw'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
   renderAdminTab(2);
 }
 
