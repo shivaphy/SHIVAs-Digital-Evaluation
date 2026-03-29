@@ -1009,6 +1009,85 @@ body {
 .save-dot.saving { background: var(--amber); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
+/* ═══════════════════════════════════════════
+   MOBILE RESPONSIVE
+═══════════════════════════════════════════ */
+@media (max-width: 768px) {
+  body { overflow: auto; }
+
+  /* Login card full width on mobile */
+  .login-card { width: 95vw; padding: 28px 20px; }
+  .login-brand-name { font-size: 17px; }
+
+  /* App shell */
+  #screen-app { overflow: auto; }
+  .main-content { flex-direction: column; overflow: visible; }
+
+  /* Hide sidebar on mobile — students see inline list */
+  .sidebar { width: 100%; min-width: unset; border-right: none; border-bottom: 1px solid var(--border); max-height: 180px; }
+  .sidebar-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; flex-direction: row; }
+  .stu-item { min-width: 120px; flex: 0 0 auto; }
+
+  /* Viewer stacks vertically */
+  .viewer-wrap { flex-direction: column; }
+  .pdf-pane { min-height: 300px; border-right: none; border-bottom: 1px solid var(--border); }
+  .pdf-scroll-area { padding: 10px; }
+
+  /* Marks panel full width */
+  .marks-panel { width: 100%; min-width: unset; border-top: 1px solid var(--border); }
+
+  /* Upload grid 1 column */
+  .upload-grid { grid-template-columns: 1fr; }
+  .bulk-steps  { grid-template-columns: 1fr; }
+  .eval-grid   { grid-template-columns: 1fr; }
+
+  /* Score strip vertical */
+  .score-strip { grid-template-columns: repeat(3,1fr); }
+
+  /* HoD stats row 2 col */
+  .hod-stats-row { grid-template-columns: 1fr 1fr !important; }
+
+  /* Topbar compact */
+  .topbar { padding: 0 12px; gap: 8px; }
+  .topbar-brand { font-size: 12px; }
+  .topbar-sep { display: none; }
+  #tb-section { display: none; }
+  #db-status  { display: none; }
+
+  /* View tabs scrollable */
+  .view-tabs { overflow-x: auto; flex-wrap: nowrap; padding: 0 10px; }
+  .view-tab  { white-space: nowrap; font-size: 11px; padding: 10px 10px; }
+
+  /* Admin card full width */
+  .admin-card { width: 95vw; }
+
+  /* Comparison cards stack */
+  .commit-row { flex-direction: column; }
+  .btn-commit { width: 100%; text-align: center; }
+}
+
+/* ─── Student self-registration screen ─── */
+#screen-register {
+  align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #f0ece3 0%, #e8e2d5 50%, #f5f2eb 100%);
+}
+.register-card {
+  position: relative; z-index: 1;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 36px 32px;
+  width: 440px; max-width: 95vw;
+  box-shadow: var(--shadow-lg);
+  max-height: 90vh; overflow-y: auto;
+}
+.register-success {
+  text-align: center; padding: 24px 0;
+}
+.register-success-icon { font-size: 40px; margin-bottom: 12px; }
+.register-success-title { font-family: 'Libre Baskerville', serif; font-size: 18px; margin-bottom: 8px; }
+.register-success-sub { font-size: 12px; color: var(--text3); line-height: 1.6; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -1054,10 +1133,67 @@ body {
       <strong>Demo credentials:</strong><br>
       Faculty: <code>admin_faculty / pass123</code><br>
       HoD: <code>hod_user / hod789</code><br>
-      Student: <code>student_001 / stu001</code>
+      Student: <code>student_001 / pass123</code>
     </div>
 
     <a class="admin-link" onclick="showAdminPortal()">🔐 Admin Portal →</a>
+    <a class="admin-link" style="margin-top:6px;color:var(--blue)" onclick="showScreen('register')">📝 New Student? Register here →</a>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     SCREEN 1b: STUDENT SELF-REGISTRATION
+══════════════════════════════════════ -->
+<div class="screen" id="screen-register">
+  <div class="login-bg-pattern"></div>
+  <div class="register-card">
+    <div class="login-brand" style="margin-bottom:20px">
+      <div class="login-brand-name">SHIVA'S <em>Digital Evaluation</em></div>
+      <div class="login-brand-sub">Student Registration</div>
+      <div class="login-divider"></div>
+    </div>
+
+    <div id="reg-form-body">
+      <div class="field">
+        <label class="field-label">Full Name</label>
+        <input class="field-input" id="sr-name" placeholder="e.g. Priya Sharma" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label">Student ID</label>
+        <input class="field-input" id="sr-sid" placeholder="e.g. STU-2024-001" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label">Email</label>
+        <input class="field-input" id="sr-email" type="email" placeholder="you@college.edu">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field">
+          <label class="field-label">Username</label>
+          <input class="field-input" id="sr-user" placeholder="your_username" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="field-label">Password</label>
+          <input class="field-input" id="sr-pw" type="password" placeholder="Min 6 chars">
+        </div>
+      </div>
+      <div id="sr-err" class="login-error" style="margin-bottom:10px"></div>
+      <button class="btn-primary" onclick="doSelfRegister()">Register Account</button>
+      <div style="background:var(--amber-lt);border:1px solid var(--amber-mid);border-radius:var(--r);padding:10px 13px;font-size:11px;color:var(--amber);margin-top:12px;line-height:1.6">
+        ⏳ Your account will be active after Admin approval. You will be able to sign in once approved.
+      </div>
+    </div>
+
+    <div id="reg-success-body" class="register-success" style="display:none">
+      <div class="register-success-icon">✅</div>
+      <div class="register-success-title">Registration Submitted!</div>
+      <div class="register-success-sub">
+        Your account is pending admin approval.<br>
+        You will be able to sign in once the admin approves your registration.<br><br>
+        Please note your username for future reference.
+      </div>
+    </div>
+
+    <button class="admin-back" style="margin-top:16px" onclick="showLogin()">← Back to Sign In</button>
   </div>
 </div>
 
@@ -1151,7 +1287,20 @@ body {
 /* ════════════════════════════════════════
    STATE & MOCK DATA
 ════════════════════════════════════════ */
-const API = 'http://127.0.0.1:8000';
+/* ── API URL: your live Render backend ── */
+const API = 'https://shivas-eval-api.onrender.com';
+
+/* ── LOCAL_USERS: plain-text passwords, used when backend is offline ──
+   These allow sign-in to always work even if Render is sleeping.
+   Change these to match whatever passwords you set. ── */
+const LOCAL_USERS = {
+  'admin_faculty': { pw: 'pass123', role: 'faculty', name: 'Dr. Priya Sharma',   status: 'approved' },
+  'hod_user':      { pw: 'hod789',  role: 'hod',     name: 'Prof. Ramesh Kumar', status: 'approved' },
+  'student_001':   { pw: 'pass123', role: 'student',  name: 'Arjun Mehta',       status: 'approved' },
+  'student_002':   { pw: 'pass123', role: 'student',  name: 'Priya Nair',        status: 'approved' },
+  'student_003':   { pw: 'pass123', role: 'student',  name: 'Rahul Singh',       status: 'approved' },
+  'student_004':   { pw: 'pass123', role: 'student',  name: 'Ananya Reddy',      status: 'approved' },
+};
 let currentUser = null, currentRole = null, currentUsername = null, loginRole = 'faculty';
 
 /* ── Notifications ── */
@@ -1203,21 +1352,26 @@ function loadCachedSession() {
 async function loadAllFromDB(username) {
   setDbStatus('loading');
   try {
-    const res = await fetch(`${API}/load-all/${username}`);
-    if (!res.ok) throw new Error('DB load failed');
+    /* 15 second timeout — handles Render cold start wake-up */
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const res   = await fetch(`${API}/load-all/${username}`, { signal: ctrl.signal });
+    clearTimeout(timer);
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
-    /* Merge students from DB */
+    /* Merge students */
     if (data.students && data.students.length) {
       data.students.forEach(s => {
+        const entry    = { id: s.id, name: s.name, username: s.username, status: s.status };
         const existing = STUDENTS.find(x => x.id === s.id);
-        const entry = { id: s.id, name: s.name, username: s.username, status: s.status };
         if (existing) Object.assign(existing, entry);
         else STUDENTS.push(entry);
       });
     }
 
-    /* Merge evaluations from DB */
+    /* Merge evaluations */
     if (data.evals) {
       Object.entries(data.evals).forEach(([sid, ev]) => {
         EVALS[sid] = EVALS[sid] || { AI:{}, FACULTY:{}, STUDENT:{} };
@@ -1227,7 +1381,7 @@ async function loadAllFromDB(username) {
       });
     }
 
-    /* Merge finalized from DB */
+    /* Merge finalized */
     if (data.finalized) {
       Object.entries(data.finalized).forEach(([sid, fin]) => { FINALIZED[sid] = fin; });
     }
@@ -1236,7 +1390,7 @@ async function loadAllFromDB(username) {
     setDbStatus('ok');
     return true;
   } catch(e) {
-    console.warn('Backend unreachable — using local cache', e);
+    console.warn('Backend unreachable — using local cache:', e.message);
     loadCachedSession();
     setDbStatus('offline');
     return false;
@@ -1276,26 +1430,21 @@ function saveSession() {
 
 
 
-/* Mock user DB (in real app: from backend) */
-const USER_DB = {
-  'admin_faculty': { pw: 'pass123', role: 'faculty', name: 'Dr. Priya Sharma',  status: 'approved' },
-  'hod_user':      { pw: 'hod789',  role: 'hod',     name: 'Prof. Ramesh Kumar', status: 'approved' },
-  'student_001':   { pw: 'stu001',  role: 'student',  name: 'Arjun Mehta',       status: 'approved' },
-};
+/* ── USER_DB: alias to LOCAL_USERS so admin portal functions still work ── */
+const USER_DB = LOCAL_USERS;
 
-const ADMIN_PW = 'admin@123'; // Change in production
+const ADMIN_PW = 'admin@123'; // Change this in production
 
-/* Registration queue */
+/* Registration queue (demo) */
 let REG_QUEUE = [
-  { username: 'faculty_new',  name: 'Ms. Kavitha Rao',   role: 'faculty',  status: 'pending',  email: 'kavitha@college.edu' },
-  { username: 'student_005',  name: 'Deepa Menon',        role: 'student',  status: 'pending',  email: 'deepa@student.edu' },
+  { username: 'faculty_new', name: 'Ms. Kavitha Rao', role: 'faculty', status: 'pending', email: 'kavitha@college.edu' },
+  { username: 'student_005', name: 'Deepa Menon',      role: 'student', status: 'pending', email: 'deepa@student.edu'   },
 ];
-let MANAGED_USERS = Object.entries(USER_DB).map(([u,v])=>({username:u,...v}));
+let MANAGED_USERS = Object.entries(LOCAL_USERS).map(([u,v]) => ({ username:u, ...v }));
 
 /* ════════════════════════════════════════
    STUDENT REGISTRY
    Each entry: { id, name, status, username }
-   username links to USER_DB for student login
 ════════════════════════════════════════ */
 let STUDENTS = [
   {id:'STU-8829', name:'Arjun Mehta',  status:'pending', username:'student_001'},
@@ -1303,11 +1452,6 @@ let STUDENTS = [
   {id:'STU-8831', name:'Rahul Singh',  status:'flagged', username:'student_003'},
   {id:'STU-8832', name:'Ananya Reddy', status:'pending', username:'student_004'},
 ];
-
-/* Add student users to USER_DB */
-USER_DB['student_002'] = { pw:'stu002', role:'student', name:'Priya Nair',   status:'approved' };
-USER_DB['student_003'] = { pw:'stu003', role:'student', name:'Rahul Singh',  status:'approved' };
-USER_DB['student_004'] = { pw:'stu004', role:'student', name:'Ananya Reddy', status:'approved' };
 
 const EVALS = {
   'STU-8829': { AI:{q1a:4.5,q1b:3.5,total:8.0,conf:0.88,fb:'Strong understanding. Formula applied correctly.'}, FACULTY:{}, STUDENT:{q1a:5,q1b:4.5,total:9.5,just:"Showed all derivation steps clearly."} },
@@ -1375,24 +1519,44 @@ async function doLogin() {
   const uname = document.getElementById('l-user').value.trim();
   const pw    = document.getElementById('l-pass').value;
 
-  /* Try real API first, fall back to mock */
+  if (!uname || !pw) {
+    err.textContent = '❌ Please enter both username and password.';
+    err.style.display = 'block';
+    btn.disabled = false; btn.textContent = 'Sign In'; return;
+  }
+
   let authenticated = false;
+
+  /* ── Step 1: Try live backend ── */
   try {
     const body = new URLSearchParams({ username: uname, password: pw });
-    const res = await fetch(`${API}/token`, { method: 'POST', body });
+    const res  = await fetch(`${API}/token`, {
+      method: 'POST', body,
+      signal: AbortSignal.timeout(8000)   // 8 second timeout
+    });
     if (res.ok) {
       const d = await res.json();
-      currentUser = d.name || uname;
-      currentRole = d.role;
+      currentUser     = d.name || uname;
+      currentRole     = d.role;
       currentUsername = uname;
-      authenticated = true;
+      authenticated   = true;
+    } else if (res.status === 403) {
+      err.textContent = '⏳ Your account is pending admin approval.';
+      err.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Sign In'; return;
     }
-  } catch {}
+  } catch (e) {
+    console.warn('Backend unreachable, using local fallback:', e.message);
+  }
 
+  /* ── Step 2: Local fallback (always works, no hashing needed) ── */
   if (!authenticated) {
-    const u = USER_DB[uname];
-    if (u && u.pw === pw && u.status === 'approved') {
-      currentUser = u.name; currentRole = u.role; currentUsername = uname; authenticated = true;
+    const u = LOCAL_USERS[uname];
+    if (u && u.pw === pw) {
+      currentUser     = u.name;
+      currentRole     = u.role;
+      currentUsername = uname;
+      authenticated   = true;
     } else if (u && u.status === 'pending') {
       err.textContent = '⏳ Your account is pending admin approval.';
       err.style.display = 'block';
@@ -1412,6 +1576,54 @@ async function doLogin() {
 function doLogout() {
   currentUser = null; currentRole = null;
   showLogin();
+}
+
+/* ════════════════════════════════════════
+   STUDENT SELF-REGISTRATION
+════════════════════════════════════════ */
+async function doSelfRegister() {
+  const name  = document.getElementById('sr-name')?.value.trim();
+  const sid   = document.getElementById('sr-sid')?.value.trim().toUpperCase();
+  const email = document.getElementById('sr-email')?.value.trim();
+  const uname = document.getElementById('sr-user')?.value.trim().toLowerCase().replace(/\s+/g,'_');
+  const pw    = document.getElementById('sr-pw')?.value;
+  const errEl = document.getElementById('sr-err');
+
+  /* Validation */
+  errEl.style.display = 'none';
+  if (!name || !sid || !uname || !pw) {
+    errEl.textContent = '❌ Please fill in all fields.'; errEl.style.display='block'; return;
+  }
+  if (pw.length < 6) {
+    errEl.textContent = '❌ Password must be at least 6 characters.'; errEl.style.display='block'; return;
+  }
+  if (LOCAL_USERS[uname]) {
+    errEl.textContent = '❌ Username already taken. Please choose another.'; errEl.style.display='block'; return;
+  }
+
+  /* Add to local pending queue */
+  REG_QUEUE.push({ username: uname, name, email, role: 'student', status: 'pending' });
+  LOCAL_USERS[uname] = { pw, role: 'student', name, status: 'pending' };
+
+  /* Try to register with backend */
+  try {
+    await fetch(`${API}/students/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ student_id: sid, name, username: uname, password: pw })
+    });
+    /* Backend registers as pending — admin must approve */
+    await fetch(`${API}/users/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: uname, password: pw, full_name: name, role: 'student', email })
+    });
+  } catch { /* Offline — local pending is enough */ }
+
+  /* Show success state */
+  document.getElementById('reg-form-body').style.display = 'none';
+  document.getElementById('reg-success-body').style.display = 'block';
+  addNotif(`New student registration pending: ${name} (${uname})`, 'warn');
 }
 
 /* ════════════════════════════════════════
@@ -1987,61 +2199,105 @@ function renderEvalRight() {
         <div class="sec-label">${isStudent?'Your Self-Assessment':'Manual Marks Entry'}</div>
 
         ${/* OR-logic conflict warning */ ev.choiceConflict ? `
-        <div class="or-banner">⚠ Student answered both Q1 and Q2. Select which question to use for marking.</div>` : ''}
+        <div class="or-banner">⚠ Student answered both OR options. Select which to use for marks.</div>` : ''}
 
-        <!-- Q1 Block -->
-        <div class="q-block ${activeQBlock==='Q2'?'inactive':''}" id="q-block-Q1">
-          <div class="q-block-hdr">
-            <span>Question 1</span>
-            ${ev.choiceConflict ? `<button class="use-btn ${activeQBlock==='Q1'?'active':''}" onclick="setActiveQ('Q1')">Use Q1</button>` : ''}
-          </div>
-          <div class="marks-form" style="border:none;border-radius:0;margin-bottom:0">
-            <div class="marks-row">
-              <div><div class="mq-label">Q1 (a)</div><div class="mq-max">Max: 5 marks</div></div>
-              <div class="marks-inp-group">
-                ${!isStudent && ai.q1a!=null?`<span class="ai-chip" onclick="fillAI('q1a',${ai.q1a})" title="AI suggests ${ai.q1a}">↑ ${ai.q1a}</span>`:''}
-                <input class="marks-inp" id="inp-q1a" type="number" min="0" max="5" step="0.5"
-                  value="${myEv.q1a??''}" oninput="calcTotal(5,'q1a')" placeholder="0" ${finalized?'disabled':''}>
-              </div>
-            </div>
-            <div class="marks-row">
-              <div><div class="mq-label">Q1 (b)</div><div class="mq-max">Max: 5 marks</div></div>
-              <div class="marks-inp-group">
-                ${!isStudent && ai.q1b!=null?`<span class="ai-chip" onclick="fillAI('q1b',${ai.q1b})" title="AI suggests ${ai.q1b}">↑ ${ai.q1b}</span>`:''}
-                <input class="marks-inp" id="inp-q1b" type="number" min="0" max="5" step="0.5"
-                  value="${myEv.q1b??''}" oninput="calcTotal(5,'q1b')" placeholder="0" ${finalized?'disabled':''}>
-              </div>
-            </div>
-          </div>
-        </div>
+        ${/* Dynamic marks entry — built from AI question structure or fallback defaults */
+        (() => {
+          /* Get question structure: prefer AI questions, else defaults */
+          const aiQs = (EVALS[currentStudent]?.AI?.questions) || {};
+          const hasAiQs = Object.keys(aiQs).length > 0;
 
-        <!-- Q2 Block (OR option — shown only if conflict detected or faculty unlocks it) -->
-        <div class="q-block ${activeQBlock==='Q1'&&!ev.choiceConflict?'inactive':''}" id="q-block-Q2" style="margin-top:8px">
-          <div class="q-block-hdr">
-            <span>Question 2 <span style="font-size:9px;color:var(--text3);font-weight:400">(OR alternative)</span></span>
-            ${ev.choiceConflict
-              ? `<button class="use-btn ${activeQBlock==='Q2'?'active':''}" onclick="setActiveQ('Q2')">Use Q2</button>`
-              : !isStudent ? `<button class="use-btn ${activeQBlock==='Q2'?'active':''}" onclick="setActiveQ(activeQBlock==='Q2'?'Q1':'Q2')">${activeQBlock==='Q2'?'Use Q1 instead':'Switch to Q2'}</button>` : ''}
-          </div>
-          <div class="marks-form" style="border:none;border-radius:0;margin-bottom:0">
-            <div class="marks-row">
-              <div><div class="mq-label">Q2 (a)</div><div class="mq-max">Max: 5 marks</div></div>
-              <div class="marks-inp-group">
-                <input class="marks-inp" id="inp-q2a" type="number" min="0" max="5" step="0.5"
-                  value="${myEv.q2a??''}" oninput="calcTotal(5,'q2a')" placeholder="0"
-                  ${finalized||activeQBlock==='Q1'?'disabled':''}>
-              </div>
+          /* Build question groups: Q1 and Q2 (OR alternative) */
+          const q1keys = hasAiQs
+            ? Object.keys(aiQs).filter(k => k.match(/^q1/i))
+            : ['q1a','q1b'];
+          const q2keys = hasAiQs
+            ? Object.keys(aiQs).filter(k => k.match(/^q2/i))
+            : ['q2a','q2b'];
+
+          function getMax(qkey) {
+            const qd = aiQs[qkey];
+            return (qd && typeof qd === 'object' ? qd.max : null) || 5;
+          }
+          function getAiMark(qkey) {
+            const qd = aiQs[qkey];
+            if (!qd) return myEv[qkey] != null ? null :
+              (EVALS[currentStudent]?.AI?.[qkey] ?? null);
+            return typeof qd === 'object' ? qd.marks : qd;
+          }
+
+          function renderQRows(keys, prefix, disabled) {
+            return keys.map(qkey => {
+              const maxM    = getMax(qkey);
+              const aiMark  = getAiMark(qkey);
+              const curVal  = myEv[qkey] ?? '';
+              const label   = qkey.replace(/^q(\d+)([a-z]?)$/i,
+                (_,n,l) => l ? `Q${n} (${l.toUpperCase()})` : `Q${n}`);
+              return `
+              <div class="marks-row">
+                <div>
+                  <div class="mq-label">${label}</div>
+                  <div class="mq-max">Max: ${maxM} marks</div>
+                </div>
+                <div class="marks-inp-group">
+                  ${!isStudent && aiMark != null
+                    ? `<span class="ai-chip" onclick="fillAI('inp-${qkey}',${aiMark})"
+                         title="AI suggests ${aiMark}">↑ ${aiMark}</span>`
+                    : ''}
+                  <input class="marks-inp" id="inp-${qkey}"
+                    type="number" min="0" max="${maxM}" step="0.5"
+                    value="${curVal}"
+                    oninput="calcTotal()"
+                    placeholder="0"
+                    data-max="${maxM}"
+                    ${disabled ? 'disabled' : ''}>
+                </div>
+              </div>`;
+            }).join('');
+          }
+
+          const q1Disabled = finalized || activeQBlock === 'Q2';
+          const q2Disabled = finalized || activeQBlock === 'Q1';
+
+          return `
+          <!-- Q1 Block -->
+          <div class="q-block ${activeQBlock==='Q2'?'inactive':''}" id="q-block-Q1">
+            <div class="q-block-hdr">
+              <span>Question 1</span>
+              ${ev.choiceConflict
+                ? `<button class="use-btn ${activeQBlock==='Q1'?'active':''}"
+                     onclick="setActiveQ('Q1')">Use Q1</button>`
+                : (!isStudent
+                  ? `<button class="use-btn ${activeQBlock==='Q2'?'':'active'}"
+                       onclick="setActiveQ(activeQBlock==='Q2'?'Q1':'Q2')">
+                       ${activeQBlock==='Q2'?'← Back to Q1':'Switch to Q2 (OR)'}</button>`
+                  : '')}
             </div>
-            <div class="marks-row">
-              <div><div class="mq-label">Q2 (b)</div><div class="mq-max">Max: 5 marks</div></div>
-              <div class="marks-inp-group">
-                <input class="marks-inp" id="inp-q2b" type="number" min="0" max="5" step="0.5"
-                  value="${myEv.q2b??''}" oninput="calcTotal(5,'q2b')" placeholder="0"
-                  ${finalized||activeQBlock==='Q1'?'disabled':''}>
-              </div>
+            <div class="marks-form" style="border:none;border-radius:0;margin-bottom:0">
+              ${renderQRows(q1keys, 'q1', q1Disabled)}
             </div>
           </div>
-        </div>
+
+          <!-- Q2 Block (OR alternative) -->
+          ${q2keys.length || !isStudent ? `
+          <div class="q-block ${activeQBlock==='Q1'&&!ev.choiceConflict?'inactive':''}"
+               id="q-block-Q2" style="margin-top:8px">
+            <div class="q-block-hdr">
+              <span>Question 2
+                <span style="font-size:9px;color:var(--text3);font-weight:400">(OR alternative)</span>
+              </span>
+              ${ev.choiceConflict
+                ? `<button class="use-btn ${activeQBlock==='Q2'?'active':''}"
+                     onclick="setActiveQ('Q2')">Use Q2</button>`
+                : ''}
+            </div>
+            <div class="marks-form" style="border:none;border-radius:0;margin-bottom:0">
+              ${renderQRows(
+                  q2keys.length ? q2keys : ['q2a','q2b'],
+                  'q2', q2Disabled)}
+            </div>
+          </div>` : ''}`;
+        })()}
         <div id="marks-err" style="display:none;font-size:11px;color:var(--red);margin:-8px 0 10px;padding:6px 10px;background:var(--red-lt);border-radius:6px;border:1px solid var(--red-mid)"></div>
 
         <div class="score-strip">
@@ -2088,47 +2344,42 @@ function switchPdfView(slot) {
 
 function setActiveQ(q) {
   activeQBlock = q;
-  /* Toggle disabled state on inputs */
-  ['q1a','q1b'].forEach(id => {
-    const el = document.getElementById(`inp-${id}`);
-    if (el) el.disabled = (q === 'Q2');
+  /* Enable/disable all inputs based on which block is active */
+  document.querySelectorAll('.marks-inp').forEach(el => {
+    const key = el.id.replace('inp-', '');
+    if (q === 'Q1') el.disabled = key.match(/^q2/i) !== null;
+    else            el.disabled = key.match(/^q1/i) !== null;
   });
-  ['q2a','q2b'].forEach(id => {
-    const el = document.getElementById(`inp-${id}`);
-    if (el) el.disabled = (q === 'Q1');
+  document.querySelectorAll('.q-block').forEach((b, i) => {
+    b.classList.toggle('inactive', i === (q==='Q1' ? 1 : 0));
   });
-  document.querySelectorAll('.q-block').forEach((b,i) => {
-    b.classList.toggle('inactive', i === (q==='Q1'?1:0));
+  document.querySelectorAll('.use-btn').forEach((b, i) => {
+    b.classList.toggle('active', i === (q==='Q1' ? 0 : 1));
   });
-  document.querySelectorAll('.use-btn').forEach((b,i) => b.classList.toggle('active', i===(q==='Q1'?0:1)));
-  calcTotal(5, null);
+  calcTotal();
 }
 
-function fillAI(qkey, v) {
-  const el = document.getElementById(`inp-${qkey}`);
-  if (el && !el.disabled) { el.value = v; calcTotal(5, qkey); }
-}
+function calcTotal() {
+  const errEl  = document.getElementById('marks-err');
+  const useQ2  = activeQBlock === 'Q2';
+  const prefix = useQ2 ? 'q2' : 'q1';
 
-function calcTotal(max, changedQ) {
-  const errEl = document.getElementById('marks-err');
-  /* Read whichever Q block is active */
-  const useQ2 = activeQBlock === 'Q2';
-  const aKey  = useQ2 ? 'inp-q2a' : 'inp-q1a';
-  const bKey  = useQ2 ? 'inp-q2b' : 'inp-q1b';
-  const aEl   = document.getElementById(aKey);
-  const bEl   = document.getElementById(bKey);
-  if (!aEl || !bEl) return;
+  /* Collect all active inputs (those not disabled and matching prefix) */
+  const inputs = Array.from(document.querySelectorAll('.marks-inp:not([disabled])'))
+    .filter(el => el.id.startsWith(`inp-${prefix}`));
 
-  let a = parseFloat(aEl.value);
-  let b = parseFloat(bEl.value);
-  let err = '';
-  if (!isNaN(a) && a > 5) { aEl.value = 5; a = 5; err = '⚠ Marks cannot exceed the maximum (5) per sub-question.'; }
-  if (!isNaN(b) && b > 5) { bEl.value = 5; b = 5; err = '⚠ Marks cannot exceed the maximum (5) per sub-question.'; }
-  if (!isNaN(a) && a < 0) { aEl.value = 0; a = 0; }
-  if (!isNaN(b) && b < 0) { bEl.value = 0; b = 0; }
+  if (!inputs.length) return;
+
+  let total = 0; let err = '';
+  inputs.forEach(el => {
+    const maxM = parseFloat(el.dataset.max) || 5;
+    let v = parseFloat(el.value);
+    if (!isNaN(v) && v > maxM) { el.value = maxM; v = maxM; err = `⚠ Marks cannot exceed the maximum (${maxM}) for that sub-question.`; }
+    if (!isNaN(v) && v < 0)    { el.value = 0;    v = 0; }
+    total += isNaN(v) ? 0 : v;
+  });
+
   if (errEl) { errEl.textContent = err; errEl.style.display = err ? 'block' : 'none'; }
-
-  const total = (isNaN(a)?0:a) + (isNaN(b)?0:b);
   const sc = document.getElementById('sc-fac');
   if (sc) sc.textContent = total.toFixed(1);
 
@@ -2145,52 +2396,63 @@ function calcTotal(max, changedQ) {
 }
 
 async function submitMarks() {
-  const errEl  = document.getElementById('marks-err');
-  const useQ2  = activeQBlock === 'Q2';
-  const aKey   = useQ2 ? 'inp-q2a' : 'inp-q1a';
-  const bKey   = useQ2 ? 'inp-q2b' : 'inp-q1b';
-  const a      = parseFloat(document.getElementById(aKey)?.value) || 0;
-  const b      = parseFloat(document.getElementById(bKey)?.value) || 0;
-  const just   = document.getElementById('just-inp')?.value || '';
-  const type   = currentRole === 'student' ? 'STUDENT' : 'FACULTY';
+  const errEl = document.getElementById('marks-err');
+  const just  = document.getElementById('just-inp')?.value || '';
+  const type  = currentRole === 'student' ? 'STUDENT' : 'FACULTY';
+  const useQ2 = activeQBlock === 'Q2';
+
+  /* Collect all active (non-disabled) inputs */
+  const inputs = Array.from(document.querySelectorAll('.marks-inp:not([disabled])'));
+  if (!inputs.length) { toast('No marks inputs found', 'err'); return; }
+
+  let marksObj = {}; let total = 0; let hasErr = false;
+  inputs.forEach(el => {
+    const key  = el.id.replace('inp-', '');   // e.g. 'q1a'
+    const maxM = parseFloat(el.dataset.max) || 5;
+    const v    = parseFloat(el.value) || 0;
+    if (v > maxM) { hasErr = true; }
+    marksObj[key] = v;
+    total += v;
+  });
+  marksObj.total    = parseFloat(total.toFixed(1));
+  marksObj.activeQ  = useQ2 ? 'Q2' : 'Q1';
+  marksObj.just     = just;
 
   /* Validation */
-  if (a > 5 || b > 5) {
-    if (errEl) { errEl.textContent = '⚠ Marks exceed maximum allowed.'; errEl.style.display = 'block'; } return;
+  if (hasErr) {
+    if (errEl) { errEl.textContent = '⚠ Some marks exceed the maximum. Please correct.'; errEl.style.display='block'; }
+    return;
   }
   if (currentRole === 'student' && !just.trim()) {
-    if (errEl) { errEl.textContent = '⚠ Justification is required for self-assessment.'; errEl.style.display = 'block'; } return;
+    if (errEl) { errEl.textContent = '⚠ Justification is required for self-assessment.'; errEl.style.display='block'; }
+    return;
   }
   if (errEl) errEl.style.display = 'none';
 
-  const total   = a + b;
-  const marksObj = useQ2
-    ? { q2a:a, q2b:b, total, activeQ:'Q2', just }
-    : { q1a:a, q1b:b, total, activeQ:'Q1', just };
-  const payload = { student_id: currentStudent, evaluator_type: type, marks: marksObj, justification: just };
+  const payload = {
+    student_id:     currentStudent,
+    evaluator_type: type,
+    marks:          marksObj,
+    justification:  just,
+    submitted_by:   currentUser,
+  };
 
   try {
     await fetch(`${API}/submit-marks`, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
     });
   } catch {}
 
-  /* Update state */
   EVALS[currentStudent]       = EVALS[currentStudent] || {};
   EVALS[currentStudent][type] = marksObj;
 
-  /* Update student status */
   const stu = STUDENTS.find(s => s.id === currentStudent);
   if (stu && type === 'FACULTY') stu.status = 'graded';
 
-  /* Persist */
   saveSession();
-
-  /* Notification */
-  const stuName = stu?.name || currentStudent;
-  addNotif(`${type === 'STUDENT' ? 'Self-assessment' : 'Evaluation'} submitted for ${stuName} — ${total}/10`, 'info');
-
-  toast(`${type === 'STUDENT' ? 'Self-assessment' : 'Evaluation'} submitted ✓`, 'ok');
+  addNotif(`${type === 'STUDENT' ? 'Self-assessment' : 'Evaluation'} submitted for ${stu?.name||currentStudent} — ${marksObj.total}/total`, 'info');
+  toast(`${type==='STUDENT'?'Self-assessment':'Evaluation'} submitted ✓`, 'ok');
   renderEvalRight();
   renderStuList();
 }
@@ -2266,95 +2528,13 @@ async function runAI() {
   addNotif(`AI analysis complete for ${STUDENTS.find(s=>s.id===currentStudent)?.name||currentStudent}`, 'info');
   toast('AI analysis complete ✦', 'ok');
 }
+
+function toggleAiCard() {
   const body   = document.getElementById('ai-card-body');
   const toggle = document.querySelector('.ai-toggle');
   if (!body || !toggle) return;
   const collapsed = body.classList.toggle('collapsed');
   toggle.textContent = collapsed ? '▶ expand' : '▼ collapse';
-}
-
-async function runAI() {
-  const btn = document.getElementById('ai-btn');
-  if (btn) {
-    btn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Analysing handwriting…';
-    btn.style.opacity = '0.7'; btn.style.pointerEvents = 'none';
-  }
-
-  try {
-    const res = await fetch(`${API}/run-ai-analysis?student_id=${currentStudent}`, {method:'POST'});
-    const d   = await res.json();
-    const e   = d.ai_eval;
-
-    /* Map flat or nested response format */
-    const q1a_marks = e.q1a?.marks   ?? (typeof e.q1a === 'number' ? e.q1a : null) ?? 4.5;
-    const q1b_marks = e.q1b?.marks   ?? (typeof e.q1b === 'number' ? e.q1b : null) ?? 3.5;
-    const q1a_fb    = e.q1a?.feedback ?? '';
-    const q1b_fb    = e.q1b?.feedback ?? '';
-
-    /* Parse strengths / weaknesses from feedback string if not provided as arrays */
-    function parseSwTags(fb) {
-      const strengths   = []; const weaknesses = []; const suggestions = [];
-      if (!fb) return { strengths, weaknesses, suggestions, prose: '' };
-      const lines = fb.split(/[.;]\s*/);
-      lines.forEach(l => {
-        const t = l.trim();
-        if (!t) return;
-        if (/correct|good|well|strong|clear|accurate|demonstrate|shows|proper|excellent/i.test(t))
-          strengths.push(t.replace(/^[-•✓✗]\s*/, ''));
-        else if (/missing|incorrect|wrong|lack|incomplete|error|not shown|absent|forgot|no\s/i.test(t))
-          weaknesses.push(t.replace(/^[-•✓✗]\s*/, ''));
-        else if (/should|could|improve|review|revise|consider|recommend/i.test(t))
-          suggestions.push(t.replace(/^[-•✓✗]\s*/, ''));
-      });
-      return { strengths: strengths.slice(0,3), weaknesses: weaknesses.slice(0,3), suggestions: suggestions.slice(0,2), prose: fb };
-    }
-
-    const sw1a = parseSwTags(q1a_fb);
-    const sw1b = parseSwTags(q1b_fb);
-
-    EVALS[currentStudent]    = EVALS[currentStudent] || {};
-    EVALS[currentStudent].AI = {
-      q1a:             q1a_marks,
-      q1a_prose:       sw1a.prose,
-      q1a_strengths:   e.q1a?.strengths   || sw1a.strengths,
-      q1a_weaknesses:  e.q1a?.weaknesses  || sw1a.weaknesses,
-      q1a_suggestions: e.q1a?.suggestions || sw1a.suggestions,
-      q1b:             q1b_marks,
-      q1b_prose:       sw1b.prose,
-      q1b_strengths:   e.q1b?.strengths   || sw1b.strengths,
-      q1b_weaknesses:  e.q1b?.weaknesses  || sw1b.weaknesses,
-      q1b_suggestions: e.q1b?.suggestions || sw1b.suggestions,
-      total:           e.total            ?? (q1a_marks + q1b_marks),
-      conf:            e.overall_confidence ?? 0.88,
-      fb:              e.general_feedback   ?? '',
-      htr:             e.htr_text           ?? '',
-    };
-
-  } catch {
-    /* Rich demo/mock data when backend is unreachable */
-    EVALS[currentStudent]    = EVALS[currentStudent] || {};
-    EVALS[currentStudent].AI = {
-      q1a:             4.5,
-      q1a_prose:       'The student correctly identified the key formula and applied it to the given values. Working is shown clearly with appropriate units.',
-      q1a_strengths:   ['Correct formula stated', 'Units used correctly', 'Working shown step-by-step'],
-      q1a_weaknesses:  ['Final rounding not shown'],
-      q1a_suggestions: ['Show the rounding step explicitly for full marks'],
-      q1b:             3.5,
-      q1b_prose:       'Partial credit awarded. The student demonstrated understanding of the concept but the derivation was incomplete — the final two steps were missing.',
-      q1b_strengths:   ['Correct approach identified', 'First three steps correct'],
-      q1b_weaknesses:  ['Derivation incomplete — last 2 steps missing', 'No conclusion statement'],
-      q1b_suggestions: ['Review derivation technique', 'Always write a conclusion sentence'],
-      total:           8.0,
-      conf:            0.88,
-      fb:              'This student shows a solid conceptual understanding of the subject. Performance on Q1(a) is commendable with clear working. Q1(b) requires attention to completing derivations fully. Overall, the student is on track but should focus on completeness rather than just correctness.',
-      htr:             'Q1(a): Let F = ma, where m = 5kg, a = 3 m/s². Therefore F = 5 × 3 = 15N. Q1(b): Using energy conservation E = ½mv² + mgh, differentiating both sides with respect to t...',
-    };
-  }
-
-  saveSession();
-  renderEvalRight();
-  addNotif(`AI analysis complete for ${STUDENTS.find(s=>s.id===currentStudent)?.name||currentStudent}`, 'info');
-  toast('AI analysis complete ✦', 'ok');
 }
 
 /* ════════════════════════════════════════
