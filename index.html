@@ -1314,6 +1314,24 @@ let sidebarSearch = '';
 /* ── Active question block (OR logic) ── */
 let activeQBlock = 'Q1';     // 'Q1' | 'Q2'
 
+/* ── Audit log (in-memory, also saved to DB) ── */
+let AUDIT_LOG = [];  // [{sid, action, by, detail, time}]
+
+function logAudit(sid, action, by, detail) {
+  const time = new Date().toLocaleString('en-IN', {
+    day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'
+  });
+  AUDIT_LOG.push({ sid, action, by, detail, time });
+  /* Also try backend */
+  try {
+    fetch(`${API}/audit`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ student_id: sid, action, performed_by: by, details: { detail } })
+    }).catch(()=>{});
+  } catch {}
+}
+
 /* ════════════════════════════════════════
    PERSISTENT STORAGE — Supabase via Backend
    All data is loaded from DB on login and
@@ -1920,38 +1938,143 @@ function renderEvalView() {
   renderEvalRight();
 }
 function renderStudentView() {
-  const mc = document.getElementById('main-content');
+  const mc  = document.getElementById('main-content');
   const sid = getStudentIdForUser(currentUsername);
   const stu = STUDENTS.find(s => s.id === sid);
 
   if (!stu) {
-    mc.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--text3)">
-      <div style="font-size:32px">📭</div>
+    mc.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:12px;color:var(--text3);padding:40px;text-align:center">
+      <div style="font-size:36px">📭</div>
       <div style="font-size:14px;font-weight:600;color:var(--text2)">No exam session assigned yet</div>
-      <div style="font-size:12px">Your faculty has not uploaded your answer script yet.<br>Please check back later.</div>
+      <div style="font-size:12px">Your faculty has not registered you yet. Please check back later.</div>
     </div>`;
     return;
   }
 
-  /* Check if answer script is available */
+  const fin       = FINALIZED[sid];
+  const ev        = EVALS[sid] || {};
+  const ai        = ev.AI     || {};
+  const stuEv     = ev.STUDENT || {};
   const hasScript = !!getPdfUrl(sid, 'answer-script');
 
+  /* ── If marks are finalized: show result card prominently ── */
+  if (fin) {
+    const aiQs    = ai.questions || {};
+    const maxTotal = ai.max_total || 10;
+    const pct      = Math.round((fin.total / maxTotal) * 100);
+    const grade    = pct>=90?'O':pct>=80?'A+':pct>=70?'A':pct>=60?'B+':pct>=50?'B':pct>=40?'C':'F';
+    const gradeColor = pct>=70?'var(--green)':pct>=50?'var(--blue)':pct>=40?'var(--amber)':'var(--red)';
+
+    mc.innerHTML = `
+    <div style="flex:1;overflow-y:auto;padding:28px;background:var(--cream)">
+
+      <!-- Result card -->
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:16px;
+                  padding:28px;margin-bottom:20px;box-shadow:var(--shadow-md);text-align:center">
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;
+                    letter-spacing:.08em;margin-bottom:12px">Official Result — ${stu.name}</div>
+        <div style="font-size:72px;font-weight:700;color:${gradeColor};font-family:'JetBrains Mono',monospace;
+                    line-height:1;margin-bottom:4px">${fin.total}</div>
+        <div style="font-size:16px;color:var(--text3);margin-bottom:16px">out of ${maxTotal}</div>
+        <div style="display:inline-block;background:${gradeColor}18;border:2px solid ${gradeColor};
+                    border-radius:50%;width:56px;height:56px;line-height:56px;font-size:22px;
+                    font-weight:700;color:${gradeColor};margin-bottom:16px">${grade}</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:4px">
+          Source: <strong>${fin.from}</strong> · Committed by HoD
+        </div>
+        <div style="font-size:11px;color:var(--text3)">Student ID: ${sid}</div>
+      </div>
+
+      <!-- Three-way comparison -->
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+        ${[
+          {label:'AI Agent',  val:ai.total,     color:'var(--purple)', bg:'var(--purple-lt)'},
+          {label:'Faculty',   val:ev.FACULTY?.total, color:'var(--blue)', bg:'var(--blue-lt)'},
+          {label:'Your Self', val:stuEv.total,  color:'var(--amber)', bg:'var(--amber-lt)'},
+        ].map(c=>`
+          <div style="background:${c.bg};border-radius:var(--r-lg);padding:14px;text-align:center">
+            <div style="font-size:10px;font-weight:700;color:${c.color};text-transform:uppercase;
+                        letter-spacing:.06em;margin-bottom:6px">${c.label}</div>
+            <div style="font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;
+                        color:${c.color}">${c.val??'—'}</div>
+          </div>`).join('')}
+      </div>
+
+      <!-- AI feedback summary -->
+      ${ai.fb ? `
+      <div style="background:var(--purple-lt);border:1px solid #ddd6fe;border-radius:var(--r-lg);
+                  padding:16px;margin-bottom:20px">
+        <div style="font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:8px">✦ AI Feedback</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.7">${ai.fb}</div>
+      </div>` : ''}
+
+      <!-- Per question breakdown -->
+      ${Object.keys(aiQs).length ? `
+      <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);
+                  padding:16px;margin-bottom:20px">
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:12px">Per Question Breakdown</div>
+        ${Object.entries(aiQs).map(([k,qd])=>{
+          if (typeof qd !== 'object') return '';
+          const maxM = qd.max || 5;
+          const pctQ = Math.min(((qd.marks||0)/maxM)*100,100);
+          const col  = pctQ>=80?'var(--green)':pctQ>=60?'var(--blue)':pctQ>=40?'var(--amber)':'var(--red)';
+          const label = k.replace(/^q(\d+)([a-z]?)$/i,(_,n,l)=>l?`Q${n}(${l.toUpperCase()})`:`Q${n}`);
+          return `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;
+                        color:var(--text);width:50px;flex-shrink:0">${label}</div>
+            <div style="flex:1;height:8px;background:var(--cream2);border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:${pctQ}%;background:${col};border-radius:4px;
+                          transition:width .5s ease"></div>
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;
+                        color:${col};width:50px;text-align:right">${qd.marks}/${maxM}</div>
+          </div>`;
+        }).join('')}
+      </div>` : ''}
+
+      <!-- Your justification -->
+      ${stuEv.just ? `
+      <div style="background:var(--amber-lt);border:1px solid var(--amber-mid);border-radius:var(--r-lg);
+                  padding:14px;margin-bottom:20px">
+        <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;
+                    letter-spacing:.07em;margin-bottom:6px">Your Self-Assessment Notes</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6">${stuEv.just}</div>
+      </div>` : ''}
+
+      <button onclick="exportStudentReport('${sid}')"
+        style="width:100%;padding:12px;background:var(--blue);color:white;border:none;
+               border-radius:var(--r);font-size:13px;font-weight:700;cursor:pointer;
+               font-family:'Plus Jakarta Sans',sans-serif">
+        📄 Download My Score Report
+      </button>
+    </div>`;
+    return;
+  }
+
+  /* ── Script not uploaded yet ── */
   if (!hasScript) {
-    mc.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;color:var(--text3);padding:40px;text-align:center">
-      <div style="font-size:32px">⏳</div>
+    mc.innerHTML = `<div style="flex:1;display:flex;align-items:center;justify-content:center;
+        flex-direction:column;gap:12px;color:var(--text3);padding:40px;text-align:center">
+      <div style="font-size:36px">⏳</div>
       <div style="font-size:14px;font-weight:600;color:var(--text2)">Answer Script Not Yet Available</div>
       <div style="font-size:12px;max-width:320px;line-height:1.7">
-        Hello <strong style="color:var(--text)">${stu.name}</strong>, your faculty has registered you but hasn't uploaded your answer script yet.<br><br>
+        Hello <strong style="color:var(--text)">${stu.name}</strong>,
+        your faculty has registered you but hasn't uploaded your answer script yet.
         Once uploaded, your scanned script will appear here for self-assessment.
       </div>
-      <div style="background:var(--blue-lt);border:1px solid var(--blue-border);border-radius:var(--r);padding:12px 18px;font-size:11px;color:var(--blue);margin-top:8px">
+      <div style="background:var(--blue-lt);border:1px solid var(--blue-border);
+                  border-radius:var(--r);padding:10px 16px;font-size:11px;color:var(--blue)">
         Student ID: <strong>${sid}</strong>
       </div>
     </div>`;
     return;
   }
 
-  /* Render the self-assessment view for this student only */
+  /* ── Script available: show self-assessment ── */
   currentStudent = sid;
   mc.innerHTML = `<div class="viewer-wrap" id="viewer-wrap"></div>`;
   renderEvalRight();
@@ -2451,6 +2574,7 @@ async function submitMarks() {
   if (stu && type === 'FACULTY') stu.status = 'graded';
 
   saveSession();
+  logAudit(currentStudent, `${type} marks submitted`, currentUser, `Total: ${marksObj.total}`);
   addNotif(`${type === 'STUDENT' ? 'Self-assessment' : 'Evaluation'} submitted for ${stu?.name||currentStudent} — ${marksObj.total}/total`, 'info');
   toast(`${type==='STUDENT'?'Self-assessment':'Evaluation'} submitted ✓`, 'ok');
   renderEvalRight();
@@ -2538,131 +2662,171 @@ function toggleAiCard() {
 }
 
 /* ════════════════════════════════════════
-   EXPORT REPORT
+   EXPORT REPORT — Dynamic (any questions)
 ════════════════════════════════════════ */
 function exportStudentReport(sid) {
-  const stu = STUDENTS.find(s => s.id === sid) || { id: sid, name: sid };
-  const ev  = EVALS[sid] || {};
-  const ai  = ev.AI || {}, fac = ev.FACULTY || {}, stuEv = ev.STUDENT || {};
-  const fin = FINALIZED[sid];
+  const stu   = STUDENTS.find(s => s.id === sid) || { id: sid, name: sid };
+  const ev    = EVALS[sid] || {};
+  const ai    = ev.AI || {};
+  const fac   = ev.FACULTY || {};
+  const stuEv = ev.STUDENT || {};
+  const fin   = FINALIZED[sid];
+  const date  = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
 
-  function swRows(strengths=[], weaknesses=[], suggestions=[]) {
-    let html = '';
-    if (strengths.length)   html += `<p style="margin:6px 0 2px"><strong style="color:#15803d">✓ Strengths:</strong> ${strengths.join(' · ')}</p>`;
-    if (weaknesses.length)  html += `<p style="margin:2px 0"><strong style="color:#b91c1c">✗ Weaknesses:</strong> ${weaknesses.join(' · ')}</p>`;
-    if (suggestions.length) html += `<p style="margin:2px 0"><strong style="color:#b45309">💡 Suggestions:</strong> ${suggestions.join(' · ')}</p>`;
-    return html;
+  /* Build dynamic question list from AI structure or marks keys */
+  const aiQs  = ai.questions || {};
+  const allQKeys = Array.from(new Set([
+    ...Object.keys(aiQs),
+    ...Object.keys(fac).filter(k => k.match(/^q\d/i)),
+    ...Object.keys(stuEv).filter(k => k.match(/^q\d/i)),
+  ])).filter(k => k !== 'total' && k !== 'activeQ' && k !== 'just' && k !== 'max_total');
+
+  function fmtKey(k) {
+    return k.replace(/^q(\d+)([a-z]?)$/i,(_,n,l)=>l?`Q${n} (${l.toUpperCase()})`:`Q${n}`);
   }
+  function getMaxForKey(k) {
+    return aiQs[k]?.max || 5;
+  }
+
+  /* Marks summary table rows */
+  const summaryRows = allQKeys.map(k => `
+    <tr>
+      <td>${fmtKey(k)}</td>
+      <td>${getMaxForKey(k)}</td>
+      <td><strong style="color:#7c3aed">${aiQs[k]?.marks ?? ai[k] ?? '—'}</strong></td>
+      <td><strong style="color:#1d4ed8">${fac[k] ?? '—'}</strong></td>
+      <td><strong style="color:#b45309">${stuEv[k] ?? '—'}</strong></td>
+    </tr>`).join('');
+
+  /* AI per-question feedback cards */
+  const aiCards = allQKeys.map(k => {
+    const qd  = aiQs[k] || {};
+    if (!qd.marks && !qd.feedback) return '';
+    const maxM = qd.max || 5;
+    const pct  = Math.min(((qd.marks||0)/maxM)*100, 100);
+    const col  = pct>=80?'#15803d':pct>=60?'#1d4ed8':pct>=40?'#b45309':'#b91c1c';
+    return `
+    <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:14px 16px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;color:#4338ca;font-size:13px">${fmtKey(k)}</span>
+        <span style="font-size:20px;font-weight:700;color:#7c3aed">${qd.marks??'—'}<span style="font-size:13px;color:#9c9488"> / ${maxM}</span></span>
+      </div>
+      <div style="height:6px;background:#ede9fe;border-radius:3px;margin-bottom:10px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${col};border-radius:3px"></div>
+      </div>
+      ${qd.feedback?`<p style="color:#5a5649;line-height:1.6;margin:0 0 8px">${qd.feedback}</p>`:''}
+      ${(qd.strengths||[]).length?`<p style="margin:4px 0"><strong style="color:#15803d">✓ Strengths:</strong> ${qd.strengths.join(' · ')}</p>`:''}
+      ${(qd.weaknesses||[]).length?`<p style="margin:4px 0"><strong style="color:#b91c1c">✗ Weaknesses:</strong> ${qd.weaknesses.join(' · ')}</p>`:''}
+      ${(qd.suggestions||[]).length?`<p style="margin:4px 0"><strong style="color:#b45309">💡 Suggestions:</strong> ${qd.suggestions.join(' · ')}</p>`:''}
+    </div>`;
+  }).join('');
+
+  /* Audit trail */
+  const auditRows = AUDIT_LOG.filter(a => a.sid === sid).map(a =>
+    `<tr><td>${a.time}</td><td>${a.action}</td><td>${a.by}</td><td>${a.detail}</td></tr>`
+  ).join('') || '<tr><td colspan="4" style="color:#9c9488;text-align:center">No audit entries</td></tr>';
 
   const html = `<!DOCTYPE html>
 <html><head>
 <title>Evaluation Report — ${stu.name}</title>
 <style>
-  body { font-family: Georgia, serif; max-width: 760px; margin: 40px auto; color: #1e1c18; font-size: 13px; }
-  h1 { font-size: 22px; border-bottom: 3px solid #1d4ed8; padding-bottom: 10px; margin-bottom: 6px; }
-  h2 { font-size: 13px; color: #5a5649; text-transform: uppercase; letter-spacing: 0.06em; margin: 22px 0 8px; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-  th { background: #eff6ff; padding: 9px 12px; font-size: 11px; text-align: left; border: 1px solid #bfdbfe; }
-  td { padding: 9px 12px; font-size: 12px; border: 1px solid #ddd8cc; vertical-align:top; }
-  .q-card { background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px; }
-  .q-card-hdr { display:flex; justify-content:space-between; margin-bottom:8px; }
-  .q-label { font-weight:700; color:#4338ca; font-size:13px; }
-  .q-score { font-size:20px; font-weight:700; color:#7c3aed; }
-  .prose { color:#5a5649; line-height:1.6; margin:6px 0; }
-  .bar-wrap { height:6px; background:#ede9fe; border-radius:3px; margin:8px 0; overflow:hidden; }
-  .bar-fill { height:100%; border-radius:3px; }
-  .final-box { background:#f0fdf4; border:2px solid #bbf7d0; border-radius:8px; padding:16px 20px; margin-top:20px; }
-  .final-label { font-size:11px; color:#15803d; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
-  .final-val { font-size:34px; font-weight:700; color:#15803d; }
-  .overall { background:#faf8f4; border:1px solid #ddd8cc; border-radius:8px; padding:14px; margin-top:12px; }
-  @media print { body { margin:20px; } }
+  body{font-family:Georgia,serif;max-width:780px;margin:40px auto;color:#1e1c18;font-size:13px}
+  h1{font-size:21px;border-bottom:3px solid #1d4ed8;padding-bottom:10px;margin-bottom:6px}
+  h2{font-size:12px;color:#5a5649;text-transform:uppercase;letter-spacing:.07em;margin:22px 0 8px;border-left:3px solid #1d4ed8;padding-left:8px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  th{background:#eff6ff;padding:9px 12px;font-size:11px;text-align:left;border:1px solid #bfdbfe}
+  td{padding:9px 12px;font-size:12px;border:1px solid #ddd8cc;vertical-align:top}
+  .final-box{background:#f0fdf4;border:2px solid #bbf7d0;border-radius:8px;padding:16px 20px;margin-top:20px;display:flex;justify-content:space-between;align-items:center}
+  .final-val{font-size:38px;font-weight:700;color:#15803d}
+  @media print{body{margin:16px}.no-print{display:none}}
 </style>
 </head><body>
 <h1>SHIVA'S Digital Evaluation — Score Report</h1>
-<table style="margin-bottom:10px;border:none">
+<table style="border:none;margin-bottom:8px">
   <tr>
-    <td style="border:none;padding:2px 0"><strong>Student:</strong> ${stu.name}</td>
-    <td style="border:none;padding:2px 0"><strong>ID:</strong> ${stu.id}</td>
-    <td style="border:none;padding:2px 0"><strong>Date:</strong> ${new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</td>
+    <td style="border:none;padding:2px 6px 2px 0"><strong>Student:</strong> ${stu.name}</td>
+    <td style="border:none;padding:2px 6px"><strong>ID:</strong> ${stu.id}</td>
+    <td style="border:none;padding:2px 0"><strong>Report Date:</strong> ${date}</td>
   </tr>
 </table>
 
 <h2>Marks Summary</h2>
 <table>
-  <tr><th>Evaluator</th><th>Q1 (a) / 5</th><th>Q1 (b) / 5</th><th>Total / 10</th><th>Notes</th></tr>
   <tr>
-    <td>🤖 AI Agent</td>
-    <td><strong>${ai.q1a??'—'}</strong></td>
-    <td><strong>${ai.q1b??'—'}</strong></td>
-    <td><strong>${ai.total??'—'}</strong></td>
-    <td>Confidence: ${ai.conf?Math.round(ai.conf*100)+'%':'—'}</td>
+    <th>Question</th><th>Max</th>
+    <th style="color:#7c3aed">AI</th>
+    <th style="color:#1d4ed8">Faculty</th>
+    <th style="color:#b45309">Student</th>
   </tr>
-  <tr>
-    <td>👩‍🏫 Faculty</td>
-    <td><strong>${fac.q1a??'—'}</strong></td>
-    <td><strong>${fac.q1b??'—'}</strong></td>
-    <td><strong>${fac.total??'—'}</strong></td>
-    <td>${fac.just||'—'}</td>
-  </tr>
-  <tr>
-    <td>✍️ Student</td>
-    <td><strong>${stuEv.q1a??'—'}</strong></td>
-    <td><strong>${stuEv.q1b??'—'}</strong></td>
-    <td><strong>${stuEv.total??'—'}</strong></td>
-    <td>${stuEv.just||'—'}</td>
+  ${summaryRows}
+  <tr style="background:#f8f8f8">
+    <td><strong>TOTAL</strong></td>
+    <td><strong>${ai.max_total||'—'}</strong></td>
+    <td><strong style="color:#7c3aed">${ai.total??'—'}</strong></td>
+    <td><strong style="color:#1d4ed8">${fac.total??'—'}</strong></td>
+    <td><strong style="color:#b45309">${stuEv.total??'—'}</strong></td>
   </tr>
 </table>
 
+${ai.conf?`<p style="font-size:11px;color:#5a5649;margin-bottom:16px">
+  AI Confidence: <strong>${Math.round(ai.conf*100)}%</strong>
+  ${Math.round(ai.conf*100)<70?' · <span style="color:#b45309">⚠ Low confidence — faculty review recommended</span>':''}
+</p>`:''}
+
 <h2>AI Detailed Feedback</h2>
 
-${ai.htr ? `<div style="background:#faf8f4;border:1px solid #ddd8cc;border-radius:8px;padding:12px 14px;margin-bottom:12px">
-  <div style="font-size:10px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px">📝 Extracted Handwriting (HTR)</div>
+${ai.htr?`<div style="background:#faf8f4;border:1px solid #ddd8cc;border-radius:8px;padding:12px 14px;margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">📝 Extracted Handwriting (HTR)</div>
   <div style="font-size:12px;color:#5a5649;line-height:1.6">${ai.htr}</div>
-</div>` : ''}
+</div>`:''}
 
-${ai.q1a != null ? `
-<div class="q-card">
-  <div class="q-card-hdr">
-    <span class="q-label">Question 1 (a)</span>
-    <span class="q-score">${ai.q1a} <span style="font-size:14px;color:#9c9488">/ 5</span></span>
-  </div>
-  <div class="bar-wrap"><div class="bar-fill" style="width:${(ai.q1a/5)*100}%;background:${ai.q1a>=4?'#15803d':ai.q1a>=3?'#1d4ed8':ai.q1a>=2?'#b45309':'#b91c1c'}"></div></div>
-  ${ai.q1a_prose ? `<div class="prose">${ai.q1a_prose}</div>` : ''}
-  ${swRows(ai.q1a_strengths, ai.q1a_weaknesses, ai.q1a_suggestions)}
-</div>` : ''}
+${aiCards}
 
-${ai.q1b != null ? `
-<div class="q-card">
-  <div class="q-card-hdr">
-    <span class="q-label">Question 1 (b)</span>
-    <span class="q-score">${ai.q1b} <span style="font-size:14px;color:#9c9488">/ 5</span></span>
-  </div>
-  <div class="bar-wrap"><div class="bar-fill" style="width:${(ai.q1b/5)*100}%;background:${ai.q1b>=4?'#15803d':ai.q1b>=3?'#1d4ed8':ai.q1b>=2?'#b45309':'#b91c1c'}"></div></div>
-  ${ai.q1b_prose ? `<div class="prose">${ai.q1b_prose}</div>` : ''}
-  ${swRows(ai.q1b_strengths, ai.q1b_weaknesses, ai.q1b_suggestions)}
-</div>` : ''}
-
-${ai.fb ? `<div class="overall">
-  <div style="font-size:10px;font-weight:700;color:#5a5649;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:5px">Overall Assessment</div>
+${ai.fb?`<div style="background:#faf8f4;border:1px solid #ddd8cc;border-radius:8px;padding:14px;margin-bottom:16px">
+  <div style="font-size:10px;font-weight:700;color:#5a5649;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Overall Assessment</div>
   <div style="line-height:1.7">${ai.fb}</div>
-</div>` : ''}
+</div>`:''}
+
+${stuEv.just?`<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px;margin-bottom:16px">
+  <div style="font-size:10px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Student Justification</div>
+  <div style="line-height:1.7">${stuEv.just}</div>
+</div>`:''}
+
+${fac.just?`<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;margin-bottom:16px">
+  <div style="font-size:10px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px">Faculty Notes</div>
+  <div style="line-height:1.7">${fac.just}</div>
+</div>`:''}
 
 ${fin ? `
 <div class="final-box">
-  <div class="final-label">✅ Official Final Marks — Committed by HoD</div>
-  <div class="final-val">${fin.total} <span style="font-size:16px;color:#15803d">/ 10</span></div>
-  <div style="font-size:12px;color:#5a5649;margin-top:4px">Source: ${fin.from}</div>
+  <div>
+    <div style="font-size:11px;color:#15803d;font-weight:700;text-transform:uppercase;letter-spacing:.06em">✅ Official Final Marks — Committed by HoD</div>
+    <div style="font-size:12px;color:#5a5649;margin-top:4px">Source: ${fin.from} · Moderator: ${fin.moderator||'HoD'}</div>
+  </div>
+  <div class="final-val">${fin.total}<span style="font-size:16px;color:#15803d"> / ${ai.max_total||10}</span></div>
 </div>` : `<p style="color:#b45309;margin-top:16px">⏳ Marks not yet finalised by HoD.</p>`}
 
+<h2 style="margin-top:28px">Audit Trail</h2>
+<table>
+  <tr><th>Time</th><th>Action</th><th>By</th><th>Details</th></tr>
+  ${auditRows}
+</table>
+
+<div class="no-print" style="text-align:center;margin-top:24px">
+  <button onclick="window.print()" style="padding:10px 28px;background:#1d4ed8;color:white;border:none;border-radius:8px;font-size:13px;cursor:pointer">🖨️ Print / Save as PDF</button>
+</div>
 </body></html>`;
 
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
-  setTimeout(() => w.print(), 600);
+  /* Small delay so styles load before printing */
+  setTimeout(() => w.print(), 700);
 }
 
-function exportAllResults() {
+/* ════════════════════════════════════════
+   EXPORT ALL RESULTS (HoD CSV)
+════════════════════════════════════════ */function exportAllResults() {
   /* Build CSV of all finalised results */
   const rows = ['Student ID,Student Name,AI Marks,Faculty Marks,Student Marks,Final Marks,Committed By,Status'];
   STUDENTS.forEach(s => {
@@ -2754,8 +2918,13 @@ function renderCmps() {
 </div></div>
       </div>
       <div class="commit-row">
-        ${fin ? `<button class="btn-commit bc-done">✓ Committed — ${fin.from} (${fin.total})</button>
-                 <button class="btn-commit" style="border-color:var(--blue-border);color:var(--blue);background:var(--blue-lt)" onclick="exportStudentReport('${s.id}')">📄 Print Report</button>` : `
+        ${fin ? `
+          <button class="btn-commit bc-done">✓ Committed — ${fin.from} (${fin.total})</button>
+          <button class="btn-commit" style="border-color:rgba(251,191,36,0.5);color:var(--amber);background:var(--amber-lt)"
+            onclick="flagForRevaluation('${s.id}')">⚑ Flag Revaluation</button>
+          <button class="btn-commit" style="border-color:var(--blue-border);color:var(--blue);background:var(--blue-lt)"
+            onclick="exportStudentReport('${s.id}')">📄 Print Report</button>
+        ` : `
           ${aT!==null?`<button class="btn-commit bc-ai" onclick="commitMarks('${s.id}','AI',${aT})">Commit AI (${aT})</button>`:''}
           ${fT!==null?`<button class="btn-commit bc-fac" onclick="commitMarks('${s.id}','FACULTY',${fT})">Commit Faculty (${fT})</button>`:''}
           ${sT!==null?`<button class="btn-commit bc-stu" onclick="commitMarks('${s.id}','STUDENT',${sT})">Commit Student (${sT})</button>`:''}
@@ -2771,11 +2940,26 @@ async function commitMarks(sid, from, total) {
     await fetch(`${API}/finalize`,{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({student_id:sid,selected_evaluator:from,moderator:currentUser})});
   } catch {}
-  FINALIZED[sid] = {from, total};
+  FINALIZED[sid] = {from, total, moderator: currentUser};
   saveSession();
+  logAudit(sid, 'Marks finalised', currentUser, `${from} → ${total}`);
   const stuName = STUDENTS.find(s=>s.id===sid)?.name || sid;
-  addNotif(`Final marks committed for ${stuName}: ${total}/10 (${from})`, 'info');
+  addNotif(`Final marks committed for ${stuName}: ${total} (${from})`, 'info');
   toast(`✓ Committed ${from} marks (${total}) for ${sid}`, 'ok');
+  renderHodView();
+}
+
+async function flagForRevaluation(sid) {
+  const reason = prompt(`Reason for revaluation request for ${sid}:`);
+  if (!reason) return;
+  const stu = STUDENTS.find(s => s.id === sid);
+  if (stu) stu.status = 'flagged';
+  /* Clear finalization so HoD can re-commit */
+  delete FINALIZED[sid];
+  saveSession();
+  logAudit(sid, 'Flagged for revaluation', currentUser, reason);
+  addNotif(`⚠ ${stu?.name||sid} flagged for revaluation: "${reason}"`, 'warn');
+  toast(`${sid} flagged for revaluation`, 'ok');
   renderHodView();
 }
 function moderateMarks(sid) {
