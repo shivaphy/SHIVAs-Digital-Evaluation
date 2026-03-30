@@ -1224,9 +1224,10 @@ body {
       </div>
       <div class="admin-body">
         <div class="admin-tabs">
-          <button class="admin-tab active" onclick="adminTab(0)">Pending Approvals</button>
-          <button class="admin-tab" onclick="adminTab(1)">Manage Users</button>
-          <button class="admin-tab" onclick="adminTab(2)">Register User</button>
+          <button class="admin-tab active" onclick="adminTab(0)">📊 Dashboard</button>
+          <button class="admin-tab" onclick="adminTab(1)">⏳ Pending</button>
+          <button class="admin-tab" onclick="adminTab(2)">👥 All Users</button>
+          <button class="admin-tab" onclick="adminTab(3)">➕ Register</button>
         </div>
         <div id="admin-content"></div>
       </div>
@@ -1415,6 +1416,14 @@ async function loadAllFromDB(username) {
         const existing = STUDENTS.find(x => x.id === s.id);
         if (existing) Object.assign(existing, entry);
         else STUDENTS.push(entry);
+        /* Populate PDF availability from DB */
+        if (s.has_script !== undefined) {
+          PDF_DB[s.id] = {
+            has_script: !!s.has_script,
+            has_scheme: true,  /* assume scheme available if script is */
+            has_qp:     true,
+          };
+        }
       });
     }
 
@@ -1463,6 +1472,10 @@ async function loadAllFromDB(username) {
 
     cacheSession();
     setDbStatus('ok');
+
+    /* Also sync user list so admin portal is always current */
+    _syncUsersFromBackend().catch(()=>{});
+
     return true;
   } catch(e) {
     console.warn('Backend unreachable — using local cache:', e.message);
@@ -1541,16 +1554,49 @@ const FINALIZED = {};
    Structure: STU_PDFS['STU-8829']['answer-script'] = objectURL
    Global slots (question-paper, scheme) shared across all students
 ════════════════════════════════════════ */
-let STU_PDFS = {};          // per-student answer scripts
-let GLOBAL_PDFS = {         // shared question paper & scheme
-  'question-paper': null,
-  'scheme': null,
-};
+let STU_PDFS  = {};   // per-student answer scripts (local blob URLs)
+let GLOBAL_PDFS = { 'question-paper': null, 'scheme': null };
 
-/* Helper: get PDF URL for a student + slot */
+/* PDF_DB_AVAILABLE: tracks which students have scripts in Supabase */
+let PDF_DB = {};   // { 'STU-001': {has_script:true, has_scheme:true, has_qp:true} }
+
+/* Helper: get the best URL for a PDF.
+   Priority: 1) Local blob (just uploaded this session)
+             2) Backend DB URL (permanent Supabase storage)
+             3) null (not available) */
 function getPdfUrl(sid, slot) {
-  if (slot === 'answer-script') return (STU_PDFS[sid] || {})['answer-script'] || null;
-  return GLOBAL_PDFS[slot] || null;
+  const docMap = { 'answer-script':'script', 'question-paper':'qp', 'scheme':'scheme' };
+  const docKey = docMap[slot];
+
+  /* Check local blob first */
+  if (slot === 'answer-script') {
+    const local = (STU_PDFS[sid] || {})[slot];
+    if (local) return local;
+  } else {
+    if (GLOBAL_PDFS[slot]) return GLOBAL_PDFS[slot];
+  }
+
+  /* Fall back to backend URL */
+  const dbInfo = PDF_DB[sid];
+  if (dbInfo) {
+    const hasKey = `has_${docKey}`;
+    if (dbInfo[hasKey]) return `${API}/pdf/${sid}/${docKey}`;
+  }
+  return null;
+}
+
+/* Check which PDFs exist in DB for a student */
+async function checkPdfsInDB(sid) {
+  if (PDF_DB[sid]) return PDF_DB[sid];  // already cached
+  try {
+    const res = await fetch(`${API}/pdf/check/${sid}`);
+    if (res.ok) {
+      const data = await res.json();
+      PDF_DB[sid] = data;
+      return data;
+    }
+  } catch {}
+  return { has_script: false, has_scheme: false, has_qp: false };
 }
 
 let currentStudent = 'STU-8829';
@@ -1712,49 +1758,68 @@ async function verifyAdmin() {
   document.getElementById('admin-panel').style.display       = 'flex';
   document.getElementById('admin-panel').style.flexDirection = 'column';
 
-  /* Show loading state in admin content */
   const el = document.getElementById('admin-content');
-  if (el) el.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">
-    <div style="width:20px;height:20px;border:2px solid var(--border2);border-top-color:var(--blue);
-                border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 8px"></div>
-    Loading latest user data…
-  </div>`;
+  if (el) el.innerHTML = `
+    <div style="padding:24px;text-align:center;color:var(--text3)">
+      <div style="width:22px;height:22px;border:2px solid var(--border2);border-top-color:var(--blue);
+                  border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 10px"></div>
+      <div style="font-size:12px">Loading user data from database…</div>
+    </div>`;
 
-  /* Fetch fresh user list from backend */
+  await _syncUsersFromBackend();
+  renderAdminTab(0);
+}
+
+async function _syncUsersFromBackend() {
   try {
-    const res = await fetch(`${API}/users`);
-    if (res.ok) {
-      const users = await res.json();
-      /* Rebuild MANAGED_USERS from DB */
+    const [usersRes, pendingRes] = await Promise.all([
+      fetch(`${API}/users`),
+      fetch(`${API}/users/pending`),
+    ]);
+
+    if (usersRes.ok) {
+      const users = await usersRes.json();
       users.forEach(u => {
-        const entry = { username: u.username, name: u.full_name || u.name, role: u.role, status: u.status, pw: '' };
+        const entry = {
+          username: u.username,
+          name:     u.full_name || u.name || u.username,
+          role:     u.role,
+          status:   u.status || 'approved',
+          email:    u.email || '',
+          pw:       '',
+        };
         const existing = MANAGED_USERS.find(x => x.username === u.username);
         if (existing) Object.assign(existing, entry);
         else MANAGED_USERS.push(entry);
-        /* Keep LOCAL_USERS in sync for offline login */
-        if (!LOCAL_USERS[u.username]) {
-          LOCAL_USERS[u.username] = { pw: 'changeme123', role: u.role, name: entry.name, status: u.status };
-        } else {
+        if (LOCAL_USERS[u.username]) {
           LOCAL_USERS[u.username].status = u.status;
           LOCAL_USERS[u.username].name   = entry.name;
         }
       });
-      /* Also fetch pending registrations */
-      const pendingUsers = users.filter(u => u.status === 'pending');
+    }
+
+    if (pendingRes.ok) {
+      const pendingUsers = await pendingRes.json();
       pendingUsers.forEach(u => {
         if (!REG_QUEUE.find(x => x.username === u.username)) {
-          REG_QUEUE.push({ username: u.username, name: u.full_name || u.name,
-                           role: u.role, status: 'pending', email: u.email || '' });
+          REG_QUEUE.push({
+            username: u.username,
+            name:     u.full_name || u.name || u.username,
+            role:     u.role,
+            status:   'pending',
+            email:    u.email || '',
+          });
         }
       });
-      cacheSession();
     }
-  } catch { /* Offline — use cached data */ }
 
-  renderAdminTab(0);
+    cacheSession();
+  } catch (e) {
+    console.warn('Could not sync users from backend:', e.message);
+  }
 }
+
 function exitAdminPortal() {
-  /* Hide panel, show auth overlay again for next time */
   document.getElementById('admin-panel').style.display = 'none';
   document.getElementById('admin-auth-overlay').style.display = 'flex';
   document.getElementById('admin-pw').value = '';
@@ -1770,44 +1835,131 @@ function adminTab(i) {
 
 function renderAdminTab(i) {
   const el = document.getElementById('admin-content');
-  if (i === 0) el.innerHTML = renderPendingApprovals();
-  else if (i === 1) el.innerHTML = renderManageUsers();
+  if (i === 0) el.innerHTML = renderAdminDashboard();
+  else if (i === 1) el.innerHTML = renderPendingApprovals();
+  else if (i === 2) el.innerHTML = renderManageUsers();
   else el.innerHTML = renderRegisterForm();
 }
 
+/* ── Tab 0: Eagle-Eye Dashboard ── */
+function renderAdminDashboard() {
+  const faculty  = MANAGED_USERS.filter(u => u.role === 'faculty');
+  const hods     = MANAGED_USERS.filter(u => u.role === 'hod');
+  const students = MANAGED_USERS.filter(u => u.role === 'student');
+  const pending  = REG_QUEUE.filter(u => u.status === 'pending');
+  const approved = MANAGED_USERS.filter(u => u.status === 'approved');
+  const totalEv  = Object.keys(EVALS).filter(sid => EVALS[sid]?.FACULTY?.total).length;
+  const totalFin = Object.keys(FINALIZED).length;
+
+  const statCards = [
+    { label:'Total Users',     val: MANAGED_USERS.length,  color:'var(--blue)',   bg:'var(--blue-lt)' },
+    { label:'Faculty',         val: faculty.length,         color:'var(--indigo)', bg:'var(--indigo-lt)' },
+    { label:'Students',        val: students.length,        color:'var(--green)',  bg:'var(--green-lt)' },
+    { label:'Pending Approval',val: pending.length,         color:'var(--amber)',  bg:'var(--amber-lt)',
+      onclick: "adminTab(1)", clickable: pending.length > 0 },
+    { label:'Graded Scripts',  val: totalEv,               color:'var(--purple)', bg:'var(--purple-lt)' },
+    { label:'Finalised',       val: totalFin,              color:'var(--green)',  bg:'var(--green-lt)' },
+  ];
+
+  return `
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">
+    ${statCards.map(s => `
+    <div style="background:${s.bg};border-radius:var(--r);padding:12px;text-align:center;
+                ${s.clickable?'cursor:pointer;':''}border:1px solid ${s.color}22"
+         ${s.onclick?`onclick="${s.onclick}"`:''}
+         title="${s.clickable?'Click to view pending':''}">
+      <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:${s.color}">${s.val}</div>
+      <div style="font-size:10px;font-weight:700;color:${s.color};text-transform:uppercase;letter-spacing:.05em;margin-top:2px">${s.label}</div>
+    </div>`).join('')}
+  </div>
+
+  ${pending.length ? `
+  <div style="background:var(--amber-lt);border:1px solid var(--amber-mid);border-radius:var(--r);
+              padding:10px 12px;margin-bottom:14px;cursor:pointer" onclick="adminTab(1)">
+    <div style="font-size:11px;font-weight:700;color:var(--amber)">
+      ⏳ ${pending.length} user${pending.length>1?'s':''} waiting for approval — click to review
+    </div>
+  </div>` : `
+  <div style="background:var(--green-lt);border:1px solid var(--green-mid);border-radius:var(--r);
+              padding:10px 12px;margin-bottom:14px">
+    <div style="font-size:11px;font-weight:700;color:var(--green)">✅ No pending approvals</div>
+  </div>`}
+
+  <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;
+              letter-spacing:.07em;margin-bottom:8px">Recent Users</div>
+  ${MANAGED_USERS.slice(0,6).map(u => `
+    <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:var(--r);
+                border:1px solid var(--border);margin-bottom:5px;background:var(--white)">
+      <div style="width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;
+                  align-items:center;justify-content:center;font-size:12px;font-weight:700;
+                  background:var(--blue-lt);color:var(--blue)">${(u.name||u.username)[0].toUpperCase()}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${u.name||u.username}</div>
+        <div style="font-size:10px;color:var(--text3);font-family:'JetBrains Mono',monospace">${u.username}</div>
+      </div>
+      <span class="badge badge-${u.role}">${u.role.toUpperCase()}</span>
+      <span class="badge ${u.status==='approved'?'badge-approved':'badge-pending'}">${(u.status||'approved').toUpperCase()}</span>
+    </div>`).join('')}
+  ${MANAGED_USERS.length > 6 ? `<div style="text-align:center;font-size:11px;color:var(--blue);cursor:pointer;margin-top:4px" onclick="adminTab(2)">View all ${MANAGED_USERS.length} users →</div>` : ''}`;
+}
+
+/* ── Tab 1: Pending Approvals ── */
 function renderPendingApprovals() {
   const pending = REG_QUEUE.filter(u => u.status === 'pending');
-  if (!pending.length) return `<div style="text-align:center;padding:30px;color:var(--text3);font-size:13px">✅ No pending approvals</div>`;
+  if (!pending.length) return `
+    <div style="text-align:center;padding:32px;color:var(--text3)">
+      <div style="font-size:28px;margin-bottom:8px">✅</div>
+      <div style="font-size:13px;font-weight:600;color:var(--text2)">No pending approvals</div>
+    </div>`;
   return pending.map(u => `
     <div class="user-row">
-      <div class="user-avatar" style="background:var(--amber-lt);color:var(--amber)">${u.name[0]}</div>
+      <div class="user-avatar" style="background:var(--amber-lt);color:var(--amber)">${(u.name||u.username)[0].toUpperCase()}</div>
       <div class="user-info">
         <div class="user-name">${u.name}</div>
-        <div class="user-meta">${u.username} · ${u.email}</div>
+        <div class="user-meta">${u.username}${u.email?' · '+u.email:''}</div>
         <span class="badge badge-${u.role}" style="margin-top:4px">${u.role.toUpperCase()}</span>
       </div>
       <div class="user-actions">
-        <button class="btn-sm btn-approve" onclick="approveUser('${u.username}')">Approve</button>
-        <button class="btn-sm btn-reject" onclick="rejectUser('${u.username}')">Reject</button>
+        <button class="btn-sm btn-approve" onclick="approveUser('${u.username}')">✓ Approve</button>
+        <button class="btn-sm btn-reject"  onclick="rejectUser('${u.username}')">✗ Reject</button>
       </div>
     </div>`).join('');
 }
 
+/* ── Tab 2: All Users (Eagle-Eye) ── */
 function renderManageUsers() {
-  return MANAGED_USERS.map(u => `
-    <div class="user-row">
-      <div class="user-avatar" style="background:var(--blue-lt);color:var(--blue)">${u.name[0]}</div>
-      <div class="user-info">
-        <div class="user-name">${u.name}</div>
-        <div class="user-meta">${u.username}</div>
-        <span class="badge badge-${u.role}" style="margin-top:4px;margin-right:4px">${u.role.toUpperCase()}</span>
-        <span class="badge ${u.status==='approved'?'badge-approved':'badge-pending'}">${u.status.toUpperCase()}</span>
+  if (!MANAGED_USERS.length) return `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">No users found</div>`;
+
+  /* Group by role */
+  const roles = ['faculty','hod','student'];
+  return roles.map(role => {
+    const users = MANAGED_USERS.filter(u => u.role === role);
+    if (!users.length) return '';
+    return `
+    <div style="margin-bottom:16px">
+      <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;
+                  letter-spacing:.07em;margin-bottom:8px;display:flex;justify-content:space-between">
+        <span>${role.toUpperCase()}S</span>
+        <span style="font-family:'JetBrains Mono',monospace">${users.length}</span>
       </div>
-      <div class="user-actions">
-        <button class="btn-sm btn-reset" onclick="resetPw('${u.username}')">Reset PW</button>
-        <button class="btn-sm btn-delete" onclick="deleteUser('${u.username}')">Remove</button>
-      </div>
-    </div>`).join('');
+      ${users.map(u => `
+      <div class="user-row">
+        <div class="user-avatar" style="background:var(--blue-lt);color:var(--blue)">${(u.name||u.username)[0].toUpperCase()}</div>
+        <div class="user-info">
+          <div class="user-name">${u.name||u.username}</div>
+          <div class="user-meta">${u.username}${u.email?' · '+u.email:''}</div>
+          <div style="display:flex;gap:4px;margin-top:3px">
+            <span class="badge badge-${u.role}">${u.role.toUpperCase()}</span>
+            <span class="badge ${u.status==='approved'||!u.status?'badge-approved':'badge-pending'}">${(u.status||'approved').toUpperCase()}</span>
+          </div>
+        </div>
+        <div class="user-actions">
+          <button class="btn-sm btn-reset"  onclick="resetPw('${u.username}')">🔑 Reset PW</button>
+          <button class="btn-sm btn-delete" onclick="deleteUser('${u.username}')">🗑 Remove</button>
+        </div>
+      </div>`).join('')}
+    </div>`;
+  }).join('');
 }
 
 function renderRegisterForm() {

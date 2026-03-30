@@ -114,3 +114,16 @@ ON CONFLICT (student_id) DO UPDATE SET
 -- STEP 6: Verify (run these separately to check)
 -- SELECT * FROM users;
 -- SELECT * FROM students;
+
+-- ═══════════════════════════════════════════════════════════
+-- Schema v4.0 additions — PDF File Storage (Priority 2)
+-- Run this block if you already ran v3.1 schema
+-- ═══════════════════════════════════════════════════════════
+
+-- Add PDF storage columns to exam_sessions
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS qp_b64     TEXT;
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS scheme_b64 TEXT;
+ALTER TABLE exam_sessions ADD COLUMN IF NOT EXISTS script_b64 TEXT;
+
+-- Add email column to users if missing
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(200);
