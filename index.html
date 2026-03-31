@@ -2460,7 +2460,17 @@ function renderStuList() {
     </div>`;
   }).join('');
 }
-function selectStu(id) { currentStudent = id; activeQBlock = 'Q1'; renderStuList(); renderEvalRight(); }
+function selectStu(id) {
+  currentStudent = id;
+  activeQBlock = 'Q1';
+  renderStuList();
+  /* Check if this student has PDFs in DB (async, non-blocking) */
+  checkPdfsInDB(id).then(dbPdfs => {
+    /* If DB has a script but we don't have a local blob, PDF_DB is already updated */
+    /* Re-render eval right so PDF viewer shows correctly */
+    renderEvalRight();
+  });
+}
 
 function renderEvalRight() {
   const vw = document.getElementById('viewer-wrap');
@@ -3518,50 +3528,114 @@ function moderateMarks(sid) {
 /* ════════════════════════════════════════
    UPLOAD VIEW  ← THE KEY FIX IS HERE
 ════════════════════════════════════════ */
-function renderUploadView() {
+async function renderUploadView() {
   const mc = document.getElementById('main-content');
+
+  /* Check which PDFs already exist in DB for current student */
+  const dbPdfs = await checkPdfsInDB(currentStudent);
+
+  const slotConfig = [
+    { slot:'question-paper', dbKey:'has_qp',     icon:'📋', lbl:'Question Paper',       hint:'PDF with OR-logic questions' },
+    { slot:'scheme',         dbKey:'has_scheme',  icon:'📐', lbl:'Scheme of Evaluation', hint:'Rubric & model answers' },
+    { slot:'answer-script',  dbKey:'has_script',  icon:'✍️', lbl:'Answer Script',        hint:"This student's scanned PDF" },
+  ];
+
+  function zoneStatus(z) {
+    const localOk = z.slot === 'answer-script'
+      ? !!(STU_PDFS[currentStudent]?.[z.slot])
+      : !!GLOBAL_PDFS[z.slot];
+    const dbOk = dbPdfs[z.dbKey];
+    if (localOk) return { ready: true,  label: '✓ New file selected' };
+    if (dbOk)    return { ready: true,  label: '✓ Stored in database' };
+    return       { ready: false, label: 'Click to select PDF' };
+  }
+
   mc.innerHTML = `
     <div class="upload-view">
-      <div class="page-title">Upload Single Session</div>
-      <div class="page-sub">Upload one student's documents manually. For multiple students at once, use the Bulk Upload tab.</div>
+      <div class="page-title">Upload Session</div>
+      <div class="page-sub">PDFs are stored permanently in Supabase — faculty never need to re-upload after logging out.</div>
 
       <div class="viewer-tip">
-        <strong>📄 PDF Viewer:</strong> After uploading, switch to the <strong>Evaluation tab</strong> and use the document selector in the viewer header to view any uploaded PDF directly in the browser.
+        <strong>📄 PDF Viewer:</strong> After uploading, switch to the <strong>Evaluation tab</strong>.
+        Documents already in the database load automatically — no re-upload needed.
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:flex-end;margin-bottom:20px">
         <div class="field" style="margin-bottom:0">
           <label class="field-label">Student ID</label>
-          <input class="field-input" id="up-sid" value="${currentStudent}" placeholder="e.g. STU-001">
+          <input class="field-input" id="up-sid" value="${currentStudent}" placeholder="e.g. STU-001"
+            onchange="refreshUploadStatus()">
         </div>
         <div class="field" style="margin-bottom:0">
           <label class="field-label">Student Name</label>
-          <input class="field-input" id="up-name" placeholder="e.g. Arjun Mehta">
+          <input class="field-input" id="up-name"
+            value="${STUDENTS.find(s=>s.id===currentStudent)?.name||''}"
+            placeholder="e.g. Arjun Mehta">
         </div>
-        <button class="btn-green" id="up-btn" onclick="uploadSession()">Upload &amp; Start</button>
+        <button class="btn-green" id="up-btn" onclick="uploadSession()">Upload &amp; Save</button>
       </div>
 
       <div class="upload-grid">
-        ${[
-          {slot:'question-paper', icon:'📋', lbl:'Question Paper',       hint:'PDF with OR-logic questions'},
-          {slot:'scheme',         icon:'📐', lbl:'Scheme of Evaluation', hint:'Rubric & model answers'},
-          {slot:'answer-script',  icon:'✍️', lbl:'Answer Script',        hint:'This student\'s scanned PDF'},
-        ].map(z=>`
-          <div class="upload-zone ${getPdfUrl(currentStudent, z.slot)||GLOBAL_PDFS[z.slot]?'ready':''}"
-               id="zone-${z.slot}" onclick="document.getElementById('file-${z.slot}').click()">
-            <input type="file" accept="application/pdf,image/*" class="uz-input" id="file-${z.slot}"
-                   onchange="fileChosen('${z.slot}')">
+        ${slotConfig.map(z => {
+          const st = zoneStatus(z);
+          return `
+          <div class="upload-zone ${st.ready?'ready':''}" id="zone-${z.slot}"
+               onclick="document.getElementById('file-${z.slot}').click()">
+            <input type="file" accept="application/pdf,image/*" class="uz-input"
+                   id="file-${z.slot}" onchange="fileChosen('${z.slot}')">
             <div class="uz-icon">${z.icon}</div>
             <div class="uz-lbl">${z.lbl}</div>
             <div class="uz-hint">${z.hint}</div>
-            <div class="uz-fname" id="fname-${z.slot}">
-              ${z.slot==='answer-script'
-                ? (getPdfUrl(currentStudent,'answer-script')?'✓ Script loaded':'Click to select PDF')
-                : (GLOBAL_PDFS[z.slot]?'✓ File loaded':'Click to select PDF')}
-            </div>
-          </div>`).join('')}
+            <div class="uz-fname" id="fname-${z.slot}">${st.label}</div>
+            ${dbPdfs[z.dbKey] ? `<div style="font-size:9px;color:var(--green);font-family:'JetBrains Mono',monospace;margin-top:2px">💾 SAVED IN DB</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+
+      <!-- Student list with script status -->
+      <div style="margin-top:20px">
+        <div class="sec-label" style="margin-bottom:10px">All Students — Script Status</div>
+        <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden">
+          ${STUDENTS.length ? STUDENTS.map(s => {
+            const has = !!(PDF_DB[s.id]?.has_script || STU_PDFS[s.id]?.['answer-script']);
+            return `
+            <div style="display:flex;align-items:center;gap:10px;padding:9px 14px;
+                        border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s"
+                 onmouseover="this.style.background='var(--cream)'"
+                 onmouseout="this.style.background=''"
+                 onclick="document.getElementById('up-sid').value='${s.id}';
+                          document.getElementById('up-name').value='${s.name}';
+                          refreshUploadStatus()">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;
+                          color:var(--text);width:90px;flex-shrink:0">${s.id}</div>
+              <div style="flex:1;font-size:12px;color:var(--text2)">${s.name}</div>
+              <span class="badge ${has?'badge-approved':'badge-pending'}" style="font-size:10px">
+                ${has ? '✓ Script' : 'No Script'}
+              </span>
+              <span class="badge st-${s.status}" style="font-size:10px">${s.status.toUpperCase()}</span>
+            </div>`;
+          }).join('') : `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">No students registered yet</div>`}
+        </div>
       </div>
     </div>`;
+}
+
+async function refreshUploadStatus() {
+  const sid = document.getElementById('up-sid')?.value?.trim();
+  if (!sid) return;
+  const dbPdfs = await checkPdfsInDB(sid);
+  const zones  = { 'answer-script':'has_script', 'question-paper':'has_qp', 'scheme':'has_scheme' };
+  Object.entries(zones).forEach(([slot, dbKey]) => {
+    const fname  = document.getElementById(`fname-${slot}`);
+    const zone   = document.getElementById(`zone-${slot}`);
+    const localOk = slot === 'answer-script'
+      ? !!(STU_PDFS[sid]?.[slot])
+      : !!GLOBAL_PDFS[slot];
+    if (fname && !localOk) {
+      fname.textContent = dbPdfs[dbKey] ? '✓ Stored in database' : 'Click to select PDF';
+      if (zone) zone.classList.toggle('ready', dbPdfs[dbKey]);
+    }
+  });
 }
 
 function fileChosen(slot) {
@@ -3586,46 +3660,76 @@ function fileChosen(slot) {
 }
 
 async function uploadSession() {
-  const sid = document.getElementById('up-sid')?.value?.trim();
+  const sid  = document.getElementById('up-sid')?.value?.trim();
+  const name = document.getElementById('up-name')?.value?.trim() || sid;
   if (!sid) { toast('Enter a Student ID', 'err'); return; }
 
-  const hasScript = !!(STU_PDFS[sid] && STU_PDFS[sid]['answer-script']);
+  const hasScript = !!(STU_PDFS[sid]?.['answer-script']);
   const hasQP     = !!GLOBAL_PDFS['question-paper'];
   const hasScheme = !!GLOBAL_PDFS['scheme'];
+  const dbPdfs    = PDF_DB[sid] || {};
 
-  if (!hasScript || !hasQP || !hasScheme) {
-    toast('Please select all three PDFs first', 'err'); return;
+  if (!hasScript && !dbPdfs.has_script) {
+    toast('Please select an Answer Script PDF', 'err'); return;
+  }
+  if (!hasQP && !dbPdfs.has_qp) {
+    toast('Please select a Question Paper PDF', 'err'); return;
+  }
+  if (!hasScheme && !dbPdfs.has_scheme) {
+    toast('Please select a Scheme of Evaluation PDF', 'err'); return;
   }
 
-  /* Add student to registry if not present */
+  /* Register student if new */
   if (!STUDENTS.find(s => s.id === sid)) {
-    const name = document.getElementById('up-name')?.value?.trim() || sid;
     const uname = sid.toLowerCase().replace(/[^a-z0-9]/g,'_');
     STUDENTS.push({ id: sid, name, status: 'pending', username: uname });
-    if (!USER_DB[uname]) {
-      USER_DB[uname] = { pw: uname + '_pass', role: 'student', name, status: 'approved' };
-      MANAGED_USERS.push({ username: uname, ...USER_DB[uname] });
+    if (!LOCAL_USERS[uname]) {
+      LOCAL_USERS[uname] = { pw: uname + '_pass', role: 'student', name, status: 'approved' };
+      MANAGED_USERS.push({ username: uname, ...LOCAL_USERS[uname] });
     }
+    /* Register in backend */
+    try {
+      await fetch(`${API}/students/register`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ student_id: sid, name, username: uname, password: uname+'_pass' })
+      });
+    } catch {}
   }
 
   EVALS[sid] = EVALS[sid] || { AI:{}, FACULTY:{}, STUDENT:{} };
 
   const btn = document.getElementById('up-btn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving to database…'; }
 
   try {
     const fd = new FormData();
     fd.append('student_id', sid);
-    ['question-paper','scheme','answer-script'].forEach(s => {
-      const f = document.getElementById(`file-${s}`)?.files[0];
-      if (f) fd.append(s.replace(/-/g,'_'), f);
-    });
-    await fetch(`${API}/upload-session`, { method:'POST', body: fd });
-  } catch {}
+    /* Only append files that were newly selected this session */
+    const qpFile  = document.getElementById('file-question-paper')?.files[0];
+    const scFile  = document.getElementById('file-scheme')?.files[0];
+    const asFile  = document.getElementById('file-answer-script')?.files[0];
+    if (qpFile) fd.append('question_paper', qpFile);
+    if (scFile) fd.append('scheme', scFile);
+    if (asFile) fd.append('answer_script', asFile);
+
+    const res = await fetch(`${API}/upload-session`, { method:'POST', body: fd });
+    if (res.ok) {
+      const data = await res.json();
+      /* Update PDF_DB with confirmed storage */
+      PDF_DB[sid] = {
+        has_script: data.has_script || hasScript || dbPdfs.has_script,
+        has_scheme: data.has_scheme || hasScheme || dbPdfs.has_scheme,
+        has_qp:     data.has_qp    || hasQP     || dbPdfs.has_qp,
+      };
+      toast(`✓ PDFs saved permanently for ${sid}`, 'ok');
+    }
+  } catch {
+    toast('✓ Session ready (PDF stored locally this session)', 'ok');
+  }
 
   currentStudent = sid;
-  if (btn) { btn.disabled = false; btn.textContent = 'Upload & Start Session'; }
-  toast(`✓ Session ready for ${sid} — switch to Evaluation tab`, 'ok');
+  if (btn) { btn.disabled = false; btn.textContent = 'Upload & Save'; }
+  addNotif(`Session uploaded for ${name} (${sid})`, 'info');
 }
 
 /* ════════════════════════════════════════
