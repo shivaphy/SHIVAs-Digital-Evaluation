@@ -1926,40 +1926,62 @@ function renderPendingApprovals() {
     </div>`).join('');
 }
 
-/* ── Tab 2: All Users (Eagle-Eye) ── */
+/* ── Tab 2: All Users (Eagle-Eye) with search ── */
 function renderManageUsers() {
+  const searchVal = (document.getElementById('admin-user-search')?.value || '').toLowerCase();
+  const filtered  = MANAGED_USERS.filter(u =>
+    !searchVal ||
+    (u.name||'').toLowerCase().includes(searchVal) ||
+    (u.username||'').toLowerCase().includes(searchVal) ||
+    (u.email||'').toLowerCase().includes(searchVal)
+  );
+
   if (!MANAGED_USERS.length) return `<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px">No users found</div>`;
 
-  /* Group by role */
-  const roles = ['faculty','hod','student'];
-  return roles.map(role => {
-    const users = MANAGED_USERS.filter(u => u.role === role);
+  const roles = ['hod','faculty','student'];
+  return `
+  <div style="margin-bottom:12px">
+    <input id="admin-user-search" type="text" placeholder="🔍 Search by name, username or email…"
+      oninput="renderAdminTab(2)"
+      style="width:100%;padding:8px 12px;border:1px solid var(--border2);border-radius:var(--r);
+             font-size:12px;font-family:'Plus Jakarta Sans',sans-serif;outline:none;
+             background:var(--cream);color:var(--text)">
+  </div>
+  <div style="font-size:11px;color:var(--text3);margin-bottom:10px">
+    Showing ${filtered.length} of ${MANAGED_USERS.length} users
+  </div>
+  ${roles.map(role => {
+    const users = filtered.filter(u => u.role === role);
     if (!users.length) return '';
     return `
     <div style="margin-bottom:16px">
       <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;
                   letter-spacing:.07em;margin-bottom:8px;display:flex;justify-content:space-between">
-        <span>${role.toUpperCase()}S</span>
+        <span>${role === 'hod' ? 'HEAD OF DEPARTMENT' : role.toUpperCase() + 'S'}</span>
         <span style="font-family:'JetBrains Mono',monospace">${users.length}</span>
       </div>
       ${users.map(u => `
       <div class="user-row">
-        <div class="user-avatar" style="background:var(--blue-lt);color:var(--blue)">${(u.name||u.username)[0].toUpperCase()}</div>
+        <div class="user-avatar" style="background:var(--blue-lt);color:var(--blue)">
+          ${(u.name||u.username)[0].toUpperCase()}
+        </div>
         <div class="user-info">
           <div class="user-name">${u.name||u.username}</div>
           <div class="user-meta">${u.username}${u.email?' · '+u.email:''}</div>
           <div style="display:flex;gap:4px;margin-top:3px">
             <span class="badge badge-${u.role}">${u.role.toUpperCase()}</span>
-            <span class="badge ${u.status==='approved'||!u.status?'badge-approved':'badge-pending'}">${(u.status||'approved').toUpperCase()}</span>
+            <span class="badge ${u.status==='approved'||!u.status?'badge-approved':'badge-pending'}">
+              ${(u.status||'approved').toUpperCase()}
+            </span>
           </div>
         </div>
         <div class="user-actions">
-          <button class="btn-sm btn-reset"  onclick="resetPw('${u.username}')">🔑 Reset PW</button>
-          <button class="btn-sm btn-delete" onclick="deleteUser('${u.username}')">🗑 Remove</button>
+          <button class="btn-sm btn-reset"  onclick="resetPw('${u.username}')">🔑</button>
+          <button class="btn-sm btn-delete" onclick="deleteUser('${u.username}')">🗑</button>
         </div>
       </div>`).join('')}
     </div>`;
-  }).join('');
+  }).join('')}`;
 }
 
 function renderRegisterForm() {
@@ -3144,28 +3166,153 @@ ${fin ? `
 }
 
 /* ════════════════════════════════════════
-   EXPORT ALL RESULTS (HoD CSV)
-════════════════════════════════════════ */function exportAllResults() {
-  /* Build CSV of all finalised results */
-  const rows = ['Student ID,Student Name,AI Marks,Faculty Marks,Student Marks,Final Marks,Committed By,Status'];
+   EXPORT ALL RESULTS — CSV + Grade Sheet
+════════════════════════════════════════ */
+function exportAllResults() {
+  const date = new Date().toISOString().slice(0,10);
+
+  /* CSV export with all marks */
+  const headers = ['Student ID','Student Name','AI Total','Faculty Total',
+                   'Student Total','Final Marks','Grade','Committed By','Status'];
+  const rows = [headers.join(',')];
+
   STUDENTS.forEach(s => {
     const ev  = EVALS[s.id] || {};
     const ai  = ev.AI || {}, fac = ev.FACULTY || {}, stu = ev.STUDENT || {};
     const fin = FINALIZED[s.id];
+    const ft  = fin ? parseFloat(fin.total) : null;
+    const max = ai.max_total || 10;
+    const pct = ft !== null ? Math.round((ft/max)*100) : null;
+    const grade = pct!==null ? (pct>=90?'O':pct>=80?'A+':pct>=70?'A':pct>=60?'B+':pct>=50?'B':pct>=40?'C':'F') : '';
     rows.push([
-      s.id, s.name,
+      `"${s.id}"`, `"${s.name}"`,
       ai.total??'', fac.total??'', stu.total??'',
-      fin?fin.total:'', fin?fin.from:'',
-      fin?'Finalised':'Pending'
+      fin?fin.total:'', grade,
+      fin?fin.from:'', fin?'Finalised':'Pending'
     ].join(','));
   });
+
   const blob = new Blob([rows.join('\n')], { type:'text/csv' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = `evaluation_results_${new Date().toISOString().slice(0,10)}.csv`;
+  a.download = `evaluation_results_${date}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
   toast('Results exported as CSV ✓', 'ok');
+}
+
+function printGradeSheet() {
+  const date = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const finalised  = STUDENTS.filter(s => FINALIZED[s.id]);
+  const pending    = STUDENTS.filter(s => !FINALIZED[s.id]);
+  const maxTotal   = STUDENTS.length > 0
+    ? (EVALS[STUDENTS[0]?.id]?.AI?.max_total || 10) : 10;
+
+  function gradeColor(pct) {
+    return pct>=70?'#15803d':pct>=50?'#1d4ed8':pct>=40?'#b45309':'#b91c1c';
+  }
+
+  const rows = STUDENTS.map((s,i) => {
+    const fin  = FINALIZED[s.id];
+    const ev   = EVALS[s.id] || {};
+    const ft   = fin ? parseFloat(fin.total) : null;
+    const pct  = ft !== null ? Math.round((ft/maxTotal)*100) : null;
+    const grade= pct!==null ? (pct>=90?'O':pct>=80?'A+':pct>=70?'A':pct>=60?'B+':pct>=50?'B':pct>=40?'C':'F') : '—';
+    const col  = pct!==null ? gradeColor(pct) : '#9c9488';
+    return `
+    <tr style="background:${i%2===0?'#fff':'#faf8f4'}">
+      <td style="padding:8px 12px;font-size:11px;color:#9c9488;font-family:monospace">${i+1}</td>
+      <td style="padding:8px 12px;font-size:12px;font-weight:600">${s.name}</td>
+      <td style="padding:8px 12px;font-size:11px;color:#9c9488;font-family:monospace">${s.id}</td>
+      <td style="padding:8px 12px;text-align:center;color:#7c3aed;font-family:monospace;font-weight:600">${ev.AI?.total??'—'}</td>
+      <td style="padding:8px 12px;text-align:center;color:#1d4ed8;font-family:monospace;font-weight:600">${ev.FACULTY?.total??'—'}</td>
+      <td style="padding:8px 12px;text-align:center;color:#b45309;font-family:monospace;font-weight:600">${ev.STUDENT?.total??'—'}</td>
+      <td style="padding:8px 12px;text-align:center;font-weight:700;font-size:15px;color:${col};font-family:monospace">${ft??'—'}</td>
+      <td style="padding:8px 12px;text-align:center">
+        <span style="background:${col}18;color:${col};border:1px solid ${col}44;border-radius:4px;
+                     padding:2px 8px;font-size:12px;font-weight:700;font-family:monospace">${grade}</span>
+      </td>
+      <td style="padding:8px 12px;text-align:center;font-size:11px;color:#9c9488">${fin?fin.from:'Pending'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head>
+<title>Grade Sheet — SHIVA'S Digital Evaluation</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Georgia, serif; color: #1e1c18; background: white; }
+  @page { size: A4 landscape; margin: 15mm; }
+  @media print { .no-print { display: none; } }
+  .header { text-align: center; padding: 20px 0 16px; border-bottom: 3px solid #1d4ed8; margin-bottom: 20px; }
+  .brand { font-size: 20px; font-weight: 700; color: #1e1c18; }
+  .brand em { color: #1d4ed8; font-style: italic; }
+  .subtitle { font-size: 12px; color: #9c9488; margin-top: 4px; letter-spacing: .04em; }
+  .meta { font-size: 11px; color: #5a5649; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-family: 'Plus Jakarta Sans', sans-serif; }
+  thead th { background: #1e1c18; color: white; padding: 10px 12px; font-size: 10px;
+             text-transform: uppercase; letter-spacing: .06em; text-align: left; }
+  thead th.center { text-align: center; }
+  tbody tr:hover { background: #eff6ff !important; }
+  .stats { display: flex; gap: 20px; justify-content: center; margin: 20px 0;
+           padding: 14px; background: #f5f3ff; border-radius: 8px; }
+  .stat { text-align: center; }
+  .stat-val { font-size: 22px; font-weight: 700; font-family: monospace; color: #1d4ed8; }
+  .stat-lbl { font-size: 10px; color: #9c9488; text-transform: uppercase; letter-spacing: .05em; }
+  .footer { text-align: center; font-size: 11px; color: #9c9488; margin-top: 20px; padding-top: 12px;
+            border-top: 1px solid #ddd; }
+</style></head><body>
+
+<div class="header">
+  <div class="brand">SHIVA'S <em>Digital Evaluation</em></div>
+  <div class="subtitle">TRI-PHASE EVALUATION SYSTEM — OFFICIAL GRADE SHEET</div>
+  <div class="meta">Generated: ${date} &nbsp;·&nbsp; Total Students: ${STUDENTS.length} &nbsp;·&nbsp; Finalised: ${finalised.length} &nbsp;·&nbsp; Pending: ${pending.length}</div>
+</div>
+
+<div class="stats">
+  ${['O (≥90%)','A+ (≥80%)','A (≥70%)','B+ (≥60%)','B (≥50%)','C (≥40%)','F (<40%)'].map(g => {
+    const letter = g.split(' ')[0];
+    const count  = STUDENTS.filter(s => {
+      const fin = FINALIZED[s.id]; if (!fin) return false;
+      const pct = Math.round((parseFloat(fin.total)/maxTotal)*100);
+      return (letter==='O'&&pct>=90)||(letter==='A+'&&pct>=80&&pct<90)||
+             (letter==='A'&&pct>=70&&pct<80)||(letter==='B+'&&pct>=60&&pct<70)||
+             (letter==='B'&&pct>=50&&pct<60)||(letter==='C'&&pct>=40&&pct<50)||
+             (letter==='F'&&pct<40);
+    }).length;
+    return `<div class="stat"><div class="stat-val">${count}</div><div class="stat-lbl">${g}</div></div>`;
+  }).join('')}
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>Student Name</th><th>Student ID</th>
+      <th class="center">AI</th><th class="center">Faculty</th>
+      <th class="center">Student</th>
+      <th class="center">Final / ${maxTotal}</th>
+      <th class="center">Grade</th>
+      <th class="center">Source</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+
+<div class="footer">
+  SHIVA'S Digital Evaluation Portal &nbsp;·&nbsp; Confidential — For Official Use Only
+</div>
+
+<div class="no-print" style="text-align:center;margin-top:24px">
+  <button onclick="window.print()" style="padding:10px 28px;background:#1d4ed8;color:white;
+    border:none;border-radius:8px;font-size:13px;cursor:pointer;margin-right:8px">🖨️ Print Grade Sheet</button>
+  <button onclick="window.close()" style="padding:10px 28px;background:#f3f0ea;color:#1e1c18;
+    border:1px solid #ddd8cc;border-radius:8px;font-size:13px;cursor:pointer">Close</button>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 600);
 }
 
 /* ════════════════════════════════════════
@@ -3173,40 +3320,68 @@ ${fin ? `
 ════════════════════════════════════════ */
 function renderHodView() {
   const mc = document.getElementById('main-content');
-  const totalStudents  = STUDENTS.length;
-  const finalised      = Object.keys(FINALIZED).length;
-  const pending        = totalStudents - finalised;
-  const flagged        = STUDENTS.filter(s => {
-    const ev = EVALS[s.id]||{}; const ai=ev.AI||{}; const fac=ev.FACULTY||{};
+  const totalStudents = STUDENTS.length;
+  const finalised     = Object.keys(FINALIZED).length;
+  const pending       = totalStudents - finalised;
+  const flagged       = STUDENTS.filter(s => {
+    const ev=EVALS[s.id]||{}; const ai=ev.AI||{}; const fac=ev.FACULTY||{};
     const aT=ai.total??null; const fT=fac.total??null;
     if (aT===null||fT===null) return false;
     return Math.abs(aT-fT)/Math.max(aT,1)*100 > 15;
   }).length;
+  const pctDone = totalStudents ? Math.round((finalised/totalStudents)*100) : 0;
 
   mc.innerHTML = `
     <div class="hod-view">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px">
+      <!-- Header row -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px">
         <div>
           <div class="page-title">Moderation Dashboard</div>
-          <div class="page-sub">Review tri-phase evaluations and commit the final grade for each student.</div>
+          <div class="page-sub">Review tri-phase evaluations and commit final grades.</div>
         </div>
-        <button onclick="exportAllResults()" style="padding:9px 16px;background:var(--green);color:white;border:none;border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;white-space:nowrap;box-shadow:0 2px 8px rgba(21,128,61,0.2)">
-          ⬇ Export All Results
-        </button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button onclick="exportAllResults()"
+            style="padding:8px 14px;background:var(--green);color:white;border:none;
+                   border-radius:var(--r);font-size:11px;font-weight:700;cursor:pointer;
+                   font-family:'Plus Jakarta Sans',sans-serif">⬇ Export CSV</button>
+          <button onclick="printGradeSheet()"
+            style="padding:8px 14px;background:var(--blue);color:white;border:none;
+                   border-radius:var(--r);font-size:11px;font-weight:700;cursor:pointer;
+                   font-family:'Plus Jakarta Sans',sans-serif">🖨️ Print Grade Sheet</button>
+          <button onclick="refreshData()"
+            style="padding:8px 14px;background:transparent;border:1px solid var(--border2);color:var(--text2);
+                   border-radius:var(--r);font-size:11px;font-weight:600;cursor:pointer;
+                   font-family:'Plus Jakarta Sans',sans-serif">↻ Refresh</button>
+        </div>
       </div>
 
       <!-- Stats row -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:22px">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">
         ${[
-          {label:'Total Students', val:totalStudents, color:'var(--blue)',   bg:'var(--blue-lt)'},
-          {label:'Finalised',      val:finalised,     color:'var(--green)',  bg:'var(--green-lt)'},
-          {label:'Pending',        val:pending,       color:'var(--amber)',  bg:'var(--amber-lt)'},
-          {label:'Flagged (>15%)', val:flagged,       color:'var(--red)',    bg:'var(--red-lt)'},
+          {label:'Total',     val:totalStudents, color:'var(--blue)',  bg:'var(--blue-lt)'},
+          {label:'Finalised', val:finalised,     color:'var(--green)', bg:'var(--green-lt)'},
+          {label:'Pending',   val:pending,       color:'var(--amber)', bg:'var(--amber-lt)'},
+          {label:'Flagged',   val:flagged,       color:'var(--red)',   bg:'var(--red-lt)'},
+          {label:'Complete',  val:pctDone+'%',   color:'var(--indigo)',bg:'var(--indigo-lt)'},
         ].map(s=>`
-          <div style="background:${s.bg};border:1px solid ${s.color}33;border-radius:var(--r-lg);padding:14px;text-align:center">
-            <div style="font-size:26px;font-family:'JetBrains Mono',monospace;font-weight:700;color:${s.color}">${s.val}</div>
-            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${s.color};margin-top:3px">${s.label}</div>
+          <div style="background:${s.bg};border:1px solid ${s.color}33;border-radius:var(--r-lg);
+                      padding:12px 8px;text-align:center">
+            <div style="font-size:22px;font-family:'JetBrains Mono',monospace;font-weight:700;
+                        color:${s.color}">${s.val}</div>
+            <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+                        color:${s.color};margin-top:2px">${s.label}</div>
           </div>`).join('')}
+      </div>
+
+      <!-- Search bar for student list -->
+      <div style="margin-bottom:14px">
+        <input type="text" id="hod-search" placeholder="🔍 Search student by name or ID…"
+          oninput="renderCmps()"
+          style="width:100%;padding:9px 13px;border:1px solid var(--border2);border-radius:var(--r);
+                 font-size:12px;font-family:'Plus Jakarta Sans',sans-serif;outline:none;
+                 background:var(--white);color:var(--text);transition:border-color .15s"
+          onfocus="this.style.borderColor='var(--blue)'"
+          onblur="this.style.borderColor='var(--border2)'">
       </div>
 
       <div id="cmp-list"></div>
@@ -3216,29 +3391,80 @@ function renderHodView() {
 function renderCmps() {
   const el = document.getElementById('cmp-list');
   if (!el) return;
-  el.innerHTML = STUDENTS.map(s => {
-    const ev = EVALS[s.id]||{}; const ai=ev.AI||{}; const fac=ev.FACULTY||{}; const stu=ev.STUDENT||{};
-    const aT=ai.total??null; const fT=fac.total??null; const sT=stu.total??null;
+
+  const q = (document.getElementById('hod-search')?.value || '').toLowerCase();
+  const filtered = STUDENTS.filter(s =>
+    !q || s.name.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    el.innerHTML = `<div style="padding:32px;text-align:center;color:var(--text3);font-size:13px">
+      No students match "${q}"</div>`;
+    return;
+  }
+
+  el.innerHTML = filtered.map(s => {
+    const ev  = EVALS[s.id]||{};
+    const ai  = ev.AI||{}, fac = ev.FACULTY||{}, stu = ev.STUDENT||{};
+    const aT  = ai.total??null, fT = fac.total??null, sT = stu.total??null;
+    const max = ai.max_total || 10;
     const dev = (aT!==null&&fT!==null) ? Math.abs(aT-fT)/Math.max(aT,1)*100 : null;
     const flagged = dev!==null && dev>15;
     const fin = FINALIZED[s.id];
+
+    /* Build dynamic marks detail from questions object */
+    function qDetail(ev) {
+      const qs = ev.questions || {};
+      const qKeys = Object.keys(qs).filter(k=>k.match(/^q\d/i));
+      if (qKeys.length) {
+        return qKeys.map(k => {
+          const v = qs[k]; const m = typeof v==='object'?v.marks:v;
+          const mx= typeof v==='object'?v.max:5;
+          const lbl = k.replace(/^q(\d+)([a-z]?)$/i,(_,n,l)=>l?`Q${n}${l.toUpperCase()}`:`Q${n}`);
+          return `${lbl}:${m??'—'}/${mx}`;
+        }).join(' · ');
+      }
+      /* Fallback: legacy flat keys */
+      return Object.entries(ev)
+        .filter(([k,v]) => k.match(/^q\d/i) && typeof v === 'number')
+        .map(([k,v]) => `${k.toUpperCase()}:${v}`).join(' · ') || '—';
+    }
+
     return `
     <div class="cmp-card">
       <div class="cmp-hdr">
-        <div><div class="cmp-stu-id">${s.id}</div><div class="cmp-stu-name">${s.name}</div></div>
-        ${dev!==null
-          ? `<div class="dev-badge ${flagged?'dev-warn':'dev-ok'}">${flagged?'⚠ ':'✓ '}${dev.toFixed(1)}% deviation</div>`
-          : `<div class="dev-badge dev-pending">Pending</div>`}
+        <div>
+          <div class="cmp-stu-id">${s.id}</div>
+          <div class="cmp-stu-name">${s.name}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center">
+          ${dev!==null
+            ? `<div class="dev-badge ${flagged?'dev-warn':'dev-ok'}">${flagged?'⚠ ':'✓ '}${dev.toFixed(1)}% deviation</div>`
+            : `<div class="dev-badge dev-pending">Pending</div>`}
+          ${fin ? `<div class="dev-badge dev-ok" style="background:var(--green-lt);color:var(--green)">✅ Finalised</div>` : ''}
+        </div>
       </div>
       <div class="eval-grid">
-        <div class="eval-box ai"><div class="eval-box-lbl">AI Agent</div><div class="eval-box-total">${aT??'—'}</div><div class="eval-box-detail">Q1a: ${ai.q1a??'—'} · Q1b: ${ai.q1b??'—'}<br>Conf: ${ai.conf?Math.round(ai.conf*100)+'%':'—'}</div></div>
-        <div class="eval-box fac"><div class="eval-box-lbl">Faculty</div><div class="eval-box-total">${fT??'—'}</div><div class="eval-box-detail">Q1a: ${fac.q1a??'—'} · Q1b: ${fac.q1b??'—'}</div></div>
-        <div class="eval-box stu"><div class="eval-box-lbl">Student</div><div class="eval-box-total">${sT??'—'}</div><div class="eval-box-detail">Q1a: ${stu.q1a??'—'} · Q1b: ${stu.q1b??'—'}${stu.just?`<br>"${stu.just.slice(0,36)}…"`:''}
-</div></div>
+        <div class="eval-box ai">
+          <div class="eval-box-lbl">AI Agent</div>
+          <div class="eval-box-total">${aT??'—'}<span style="font-size:12px;color:var(--text3)">/${max}</span></div>
+          <div class="eval-box-detail">${qDetail(ai)}<br>Conf: ${ai.conf?Math.round(ai.conf*100)+'%':'—'}</div>
+        </div>
+        <div class="eval-box fac">
+          <div class="eval-box-lbl">Faculty</div>
+          <div class="eval-box-total">${fT??'—'}<span style="font-size:12px;color:var(--text3)">/${max}</span></div>
+          <div class="eval-box-detail">${qDetail(fac)}</div>
+        </div>
+        <div class="eval-box stu">
+          <div class="eval-box-lbl">Student</div>
+          <div class="eval-box-total">${sT??'—'}<span style="font-size:12px;color:var(--text3)">/${max}</span></div>
+          <div class="eval-box-detail">${qDetail(stu)}${stu.just?`<br><em style="color:var(--text3)">"${stu.just.slice(0,40)}…"</em>`:''}
+          </div>
+        </div>
       </div>
       <div class="commit-row">
         ${fin ? `
-          <button class="btn-commit bc-done">✓ Committed — ${fin.from} (${fin.total})</button>
+          <button class="btn-commit bc-done">✓ Committed — ${fin.from} (${fin.total}/${max})</button>
           <button class="btn-commit" style="border-color:rgba(251,191,36,0.5);color:var(--amber);background:var(--amber-lt)"
             onclick="flagForRevaluation('${s.id}')">⚑ Flag Revaluation</button>
           <button class="btn-commit" style="border-color:var(--blue-border);color:var(--blue);background:var(--blue-lt)"
