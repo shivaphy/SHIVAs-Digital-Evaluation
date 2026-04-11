@@ -1420,12 +1420,56 @@ function logAudit(sid, action, by, detail) {
 /* ── Save to localStorage as offline cache ── */
 function cacheSession() {
   try {
-    localStorage.setItem('sde_evals',    JSON.stringify(EVALS));
-    localStorage.setItem('sde_students', JSON.stringify(STUDENTS));
-    localStorage.setItem('sde_finalized',JSON.stringify(FINALIZED));
-    /* ── Also persist admin user data ── */
-    localStorage.setItem('sde_managed_users', JSON.stringify(MANAGED_USERS));
-    localStorage.setItem('sde_reg_queue',     JSON.stringify(REG_QUEUE));
+    localStorage.setItem('sde_evals',        JSON.stringify(EVALS));
+    localStorage.setItem('sde_students',     JSON.stringify(STUDENTS));
+    localStorage.setItem('sde_finalized',    JSON.stringify(FINALIZED));
+    localStorage.setItem('sde_managed_users',JSON.stringify(MANAGED_USERS));
+    localStorage.setItem('sde_reg_queue',    JSON.stringify(REG_QUEUE));
+    /* ── Persist LOCAL_USERS (plain-text passwords) for offline login ──
+       This is the key fix: passwords survive page reload via localStorage.
+       Only keys added after initial load are saved here (new registrations). */
+    const toSave = {};
+    Object.entries(LOCAL_USERS).forEach(([k,v]) => {
+      if (v.pw && v.pw !== '') toSave[k] = v;
+    });
+    localStorage.setItem('sde_local_users', JSON.stringify(toSave));
+  } catch(e) {}
+}
+
+/* ── Called IMMEDIATELY on page load (before any login attempt) ── */
+function restoreLocalUsers() {
+  try {
+    /* Restore plain-text user credentials saved by previous sessions */
+    const saved = localStorage.getItem('sde_local_users');
+    if (saved) {
+      const obj = JSON.parse(saved);
+      Object.entries(obj).forEach(([k,v]) => {
+        if (!LOCAL_USERS[k]) LOCAL_USERS[k] = v;
+        else if (v.pw) LOCAL_USERS[k].pw = v.pw;   /* restore password */
+      });
+    }
+    /* Also restore MANAGED_USERS and REG_QUEUE */
+    const mu = localStorage.getItem('sde_managed_users');
+    const rq = localStorage.getItem('sde_reg_queue');
+    if (mu) {
+      const arr = JSON.parse(mu);
+      arr.forEach(u => {
+        if (!MANAGED_USERS.find(x => x.username === u.username)) MANAGED_USERS.push(u);
+        else Object.assign(MANAGED_USERS.find(x => x.username === u.username), u);
+        /* Restore password to LOCAL_USERS */
+        if (u.pw && !LOCAL_USERS[u.username]) {
+          LOCAL_USERS[u.username] = { pw: u.pw, role: u.role, name: u.name, status: u.status };
+        } else if (u.pw && LOCAL_USERS[u.username] && !LOCAL_USERS[u.username].pw) {
+          LOCAL_USERS[u.username].pw = u.pw;
+        }
+      });
+    }
+    if (rq) {
+      const arr = JSON.parse(rq);
+      arr.forEach(u => {
+        if (!REG_QUEUE.find(x => x.username === u.username)) REG_QUEUE.push(u);
+      });
+    }
   } catch(e) {}
 }
 
@@ -1435,9 +1479,6 @@ function loadCachedSession() {
     const ev = localStorage.getItem('sde_evals');
     const st = localStorage.getItem('sde_students');
     const fi = localStorage.getItem('sde_finalized');
-    const mu = localStorage.getItem('sde_managed_users');
-    const rq = localStorage.getItem('sde_reg_queue');
-
     if (ev) Object.assign(EVALS, JSON.parse(ev));
     if (st) {
       const arr = JSON.parse(st);
@@ -1447,29 +1488,6 @@ function loadCachedSession() {
       });
     }
     if (fi) Object.assign(FINALIZED, JSON.parse(fi));
-
-    /* Restore admin user lists */
-    if (mu) {
-      const arr = JSON.parse(mu);
-      arr.forEach(u => {
-        if (!MANAGED_USERS.find(x => x.username === u.username)) {
-          MANAGED_USERS.push(u);
-          /* Also restore to LOCAL_USERS for login fallback */
-          if (!LOCAL_USERS[u.username]) {
-            LOCAL_USERS[u.username] = { pw: u.pw || 'changeme123', role: u.role, name: u.name, status: u.status };
-          }
-        } else {
-          Object.assign(MANAGED_USERS.find(x => x.username === u.username), u);
-        }
-      });
-    }
-    if (rq) {
-      const arr = JSON.parse(rq);
-      arr.forEach(u => {
-        if (!REG_QUEUE.find(x => x.username === u.username)) REG_QUEUE.push(u);
-        else Object.assign(REG_QUEUE.find(x => x.username === u.username), u);
-      });
-    }
   } catch(e) {}
 }
 
@@ -1745,7 +1763,7 @@ async function doLogin() {
     const body = new URLSearchParams({ username: uname, password: pw });
     const res  = await fetch(`${API}/token`, {
       method: 'POST', body,
-      signal: AbortSignal.timeout(8000)   // 8 second timeout
+      signal: AbortSignal.timeout(8000)
     });
     if (res.ok) {
       const d = await res.json();
@@ -1753,6 +1771,15 @@ async function doLogin() {
       currentRole     = d.role;
       currentUsername = uname;
       authenticated   = true;
+      /* Update LOCAL_USERS with confirmed role/name from backend (keep existing pw) */
+      if (!LOCAL_USERS[uname]) {
+        LOCAL_USERS[uname] = { pw, role: d.role, name: d.name || uname, status: 'approved' };
+      } else {
+        LOCAL_USERS[uname].role = d.role;
+        LOCAL_USERS[uname].name = d.name || uname;
+        if (!LOCAL_USERS[uname].pw) LOCAL_USERS[uname].pw = pw;
+      }
+      cacheSession();  /* save confirmed credentials for next offline login */
     } else if (res.status === 403) {
       err.textContent = '⏳ Your account is pending admin approval.';
       err.style.display = 'block';
@@ -1762,18 +1789,19 @@ async function doLogin() {
     console.warn('Backend unreachable, using local fallback:', e.message);
   }
 
-  /* ── Step 2: Local fallback (always works, no hashing needed) ── */
+  /* ── Step 2: Local fallback — uses credentials saved from previous successful logins ── */
   if (!authenticated) {
     const u = LOCAL_USERS[uname];
     if (u && u.pw === pw) {
-      currentUser     = u.name;
+      if (u.status === 'pending') {
+        err.textContent = '⏳ Your account is pending admin approval.';
+        err.style.display = 'block';
+        btn.disabled = false; btn.textContent = 'Sign In'; return;
+      }
+      currentUser     = u.name || uname;
       currentRole     = u.role;
       currentUsername = uname;
       authenticated   = true;
-    } else if (u && u.status === 'pending') {
-      err.textContent = '⏳ Your account is pending admin approval.';
-      err.style.display = 'block';
-      btn.disabled = false; btn.textContent = 'Sign In'; return;
     }
   }
 
@@ -1872,20 +1900,25 @@ async function _syncUsersFromBackend() {
     if (usersRes.ok) {
       const users = await usersRes.json();
       users.forEach(u => {
+        const existing = MANAGED_USERS.find(x => x.username === u.username);
         const entry = {
           username: u.username,
           name:     u.full_name || u.name || u.username,
           role:     u.role,
           status:   u.status || 'approved',
           email:    u.email || '',
-          pw:       '',
+          /* IMPORTANT: never overwrite a stored password with blank.
+             The backend never sends passwords back — keep whatever we have. */
+          pw: existing?.pw || LOCAL_USERS[u.username]?.pw || '',
         };
-        const existing = MANAGED_USERS.find(x => x.username === u.username);
         if (existing) Object.assign(existing, entry);
         else MANAGED_USERS.push(entry);
+        /* Update LOCAL_USERS status/role/name but KEEP the stored password */
         if (LOCAL_USERS[u.username]) {
           LOCAL_USERS[u.username].status = u.status;
+          LOCAL_USERS[u.username].role   = u.role;
           LOCAL_USERS[u.username].name   = entry.name;
+          /* do NOT touch .pw */
         }
       });
     }
@@ -1905,7 +1938,7 @@ async function _syncUsersFromBackend() {
       });
     }
 
-    cacheSession();
+    cacheSession();   /* save updated MANAGED_USERS (with passwords preserved) */
   } catch (e) {
     console.warn('Could not sync users from backend:', e.message);
   }
@@ -4578,6 +4611,10 @@ function toast(msg, type='') {
   clearTimeout(el._t);
   el._t = setTimeout(() => el.classList.remove('show'), 3200);
 }
+
+/* ── Run immediately on page load — restores all cached credentials ──
+   All functions are defined by this point so it's safe to call. ── */
+restoreLocalUsers();
 </script>
 </body>
 </html>
