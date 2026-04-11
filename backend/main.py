@@ -401,43 +401,129 @@ async def check_pdfs(student_id: str):
 # ═══════════════════════════════════════
 # AI ANALYSIS
 # ═══════════════════════════════════════
-SESSIONS: Dict[str, dict] = {}  # in-memory cache for current session PDFs
+SESSIONS: Dict[str, dict] = {}        # in-memory PDF cache per session
+ACTIVE_SCHEME: dict = {}              # structured scheme set by faculty via /set-scheme
 
-def _build_scheme_prompt(scheme_text: str) -> str:
-    return f"""
-You are an expert academic examiner. You have been given:
-1. A student's HANDWRITTEN ANSWER SCRIPT (PDF attached)
-2. The SCHEME OF EVALUATION below which defines every question, its maximum marks, and marking criteria.
+def _build_structured_prompt(scheme: dict) -> str:
+    """
+    Build a precise, machine-readable prompt from the structured scheme JSON.
+    This is far more reliable than asking Gemini to read a scheme PDF visually.
+    """
+    lines = []
+    lines.append("You are an expert academic examiner evaluating a HANDWRITTEN ANSWER SCRIPT.")
+    lines.append("")
+    lines.append(f"EXAM: {scheme.get('exam_title','Unknown')}  |  "
+                 f"SUBJECT: {scheme.get('subject','')}  |  "
+                 f"TOTAL MARKS: {scheme.get('total_marks',0)}")
+    lines.append("")
+    lines.append("═" * 60)
+    lines.append("OFFICIAL MARKING SCHEME — follow this EXACTLY:")
+    lines.append("═" * 60)
 
-SCHEME OF EVALUATION:
-{scheme_text}
+    for q in scheme.get("questions", []):
+        qnum  = q.get("num","Q?")
+        qtype = q.get("type","standard")
+        parts = q.get("parts",[])
+        qtotal = sum(float(p.get("marks",0)) for p in parts)
+        lines.append(f"\n{qnum}  [{qtotal} marks total]"
+                     + ("  ← OR CHOICE (evaluate whichever part the student attempted, NOT both)" if qtype=="or" else ""))
+        for p in parts:
+            key      = p.get("key","")
+            label    = p.get("label","")
+            marks    = p.get("marks",0)
+            desc     = p.get("description","")
+            keywords = p.get("keywords","")
+            co       = p.get("co","")
+            bloom    = p.get("bloom","")
+            lines.append(f"  {label} [{marks} marks] — CO:{co} | Bloom:{bloom}")
+            lines.append(f"      EXPECTED: {desc}")
+            if keywords:
+                kws = [k.strip() for k in keywords.split(",") if k.strip()]
+                lines.append(f"      AWARD 1 mark per keyword present: {', '.join(kws)}")
+                lines.append(f"      Award partial marks for correct method even if final answer wrong.")
 
-YOUR TASK:
-- READ the handwriting carefully (HTR).
-- IDENTIFY which questions the student attempted.
-- EVALUATE each sub-question strictly against the scheme.
-- AWARD marks question by question.
-- DETECT if the student answered both OR options (flag as choice_conflict).
-- GIVE partial credit where correct method is shown.
+    lines.append("\n" + "═" * 60)
+    lines.append("EVALUATION RULES:")
+    lines.append("1. READ the handwriting carefully (HTR — Handwriting Text Recognition).")
+    lines.append("2. For each attempted sub-question, check against the scheme above.")
+    lines.append("3. Award marks based on keywords present and correctness of method.")
+    lines.append("4. For OR questions: evaluate ONLY the part attempted. If student answered BOTH, set choice_conflict=true.")
+    lines.append("5. Do NOT invent questions not in the scheme above.")
+    lines.append("6. Award partial credit generously where working is shown.")
+    lines.append("")
+    lines.append("RETURN ONLY valid JSON with NO markdown fences, NO text before or after:")
 
-RETURN ONLY valid JSON — no markdown, no text outside the JSON:
-{{
-  "questions": {{
-    "q1a": {{"marks": 4.5, "max": 5, "feedback": "One clear sentence.",
-              "strengths": ["s1"], "weaknesses": ["w1"], "suggestions": ["sg1"]}},
-    "q1b": {{"marks": 3,   "max": 5, "feedback": "One clear sentence.",
-              "strengths": ["s1"], "weaknesses": ["w1", "w2"], "suggestions": ["sg1"]}}
-  }},
+    # Build expected JSON structure from scheme
+    q_example = {}
+    for q in scheme.get("questions",[]):
+        for p in q.get("parts",[]):
+            key = p.get("key","q1a")
+            q_example[key] = {
+                "marks": f"<float 0 to {p.get('marks',5)}>",
+                "max":   p.get("marks", 5),
+                "feedback":    "<one sentence>",
+                "strengths":   ["<str>"],
+                "weaknesses":  ["<str>"],
+                "suggestions": ["<str>"]
+            }
+
+    import json as _json
+    result_template = {
+        "questions":          q_example,
+        "total":              f"<sum of awarded marks>",
+        "max_total":          scheme.get("total_marks", 10),
+        "overall_confidence": "<float 0.0-1.0>",
+        "choice_conflict":    False,
+        "htr_text":           "<key handwritten content extracted>",
+        "general_feedback":   "<2-3 sentence overall assessment>"
+    }
+    lines.append(_json.dumps(result_template, indent=2))
+    return "\n".join(lines)
+
+def _build_pdf_fallback_prompt() -> str:
+    """Used when no structured scheme is available — reads scheme from PDF."""
+    return """You are an expert academic examiner. You have been given:
+1. A SCHEME OF EVALUATION PDF (if uploaded) — read it for question structure and max marks.
+2. A HANDWRITTEN ANSWER SCRIPT PDF.
+
+TASK:
+- Read the handwriting carefully (HTR).
+- Identify every attempted sub-question.
+- Evaluate strictly against the scheme.
+- Award marks per sub-question with correct max values from the scheme.
+- Detect OR-choice conflicts.
+
+RETURN ONLY valid JSON (no markdown):
+{
+  "questions": {
+    "q1a": {"marks": 4.5, "max": 5, "feedback": "sentence",
+            "strengths": ["s1"], "weaknesses": ["w1"], "suggestions": ["sg1"]},
+    "q1b": {"marks": 3, "max": 5, "feedback": "sentence",
+            "strengths": ["s1"], "weaknesses": ["w1"], "suggestions": ["sg1"]}
+  },
   "total": 7.5, "max_total": 10, "overall_confidence": 0.87,
   "choice_conflict": false,
-  "htr_text": "Brief extract of key handwriting read",
-  "general_feedback": "2-3 sentence overall assessment."
-}}
-"""
+  "htr_text": "key handwritten text extracted",
+  "general_feedback": "2-3 sentence assessment"
+}"""
+
+# ── Store structured scheme ──────────────────────────────
+@app.post("/set-scheme")
+async def set_scheme(scheme: dict):
+    """Faculty posts structured scheme JSON. Used by AI for precise evaluation."""
+    global ACTIVE_SCHEME
+    ACTIVE_SCHEME = scheme
+    print(f"Scheme activated: {scheme.get('exam_title')} ({scheme.get('total_marks')} marks, "
+          f"{len(scheme.get('questions',[]))} questions)")
+    return {"status": "ok", "questions": len(scheme.get("questions", []))}
+
+@app.get("/get-scheme")
+async def get_scheme():
+    return ACTIVE_SCHEME if ACTIVE_SCHEME else {"status": "none"}
 
 @app.post("/run-ai-analysis")
 async def run_ai_analysis(student_id: str):
-    # First try in-memory cache, then fall back to DB
+    # Load PDFs — try in-memory cache first, then DB
     session = SESSIONS.get(student_id)
     if not session or not session.get("script_b64"):
         row = db_exec(
@@ -446,7 +532,7 @@ async def run_ai_analysis(student_id: str):
         )
         if row:
             session = dict(row)
-            SESSIONS[student_id] = session  # cache it
+            SESSIONS[student_id] = session
 
     if session and session.get("script_b64") and GEMINI_KEY:
         try:
@@ -454,63 +540,121 @@ async def run_ai_analysis(student_id: str):
             script_bytes = base64.b64decode(session["script_b64"])
             parts        = []
 
-            if session.get("scheme_b64"):
-                parts.append({"mime_type": "application/pdf",
-                               "data": base64.b64decode(session["scheme_b64"])})
-            if session.get("qp_b64"):
-                parts.append({"mime_type": "application/pdf",
-                               "data": base64.b64decode(session["qp_b64"])})
+            # Always include the answer script
             parts.append({"mime_type": "application/pdf", "data": script_bytes})
 
-            prompt = _build_scheme_prompt(
-                "The Scheme of Evaluation is provided as the first PDF above. "
-                "Read it carefully to determine every question's maximum marks and criteria."
-                if session.get("scheme_b64") else
-                "No scheme uploaded. Use standard academic marking. "
-                "Infer question structure from the answer script itself."
-            )
+            # Include scheme PDF only if NO structured scheme is active
+            # (structured prompt is more reliable than visual PDF reading)
+            use_structured = bool(ACTIVE_SCHEME and ACTIVE_SCHEME.get("questions"))
+
+            if not use_structured:
+                if session.get("scheme_b64"):
+                    parts.insert(0, {"mime_type": "application/pdf",
+                                     "data": base64.b64decode(session["scheme_b64"])})
+                if session.get("qp_b64"):
+                    parts.insert(0, {"mime_type": "application/pdf",
+                                     "data": base64.b64decode(session["qp_b64"])})
+
+            # Build prompt
+            if use_structured:
+                prompt = _build_structured_prompt(ACTIVE_SCHEME)
+                print(f"Using STRUCTURED scheme: {ACTIVE_SCHEME.get('exam_title')}")
+            else:
+                prompt = _build_pdf_fallback_prompt()
+                print("Using PDF-fallback prompt (no structured scheme active)")
+
             parts.insert(0, prompt)
+
             response = model.generate_content(parts)
-            raw      = response.text.strip().replace("```json","").replace("```","").strip()
-            result   = json.loads(raw)
-            result   = _normalise_ai_result(result)
+            raw      = response.text.strip()
+            # Strip markdown fences if present
+            raw = raw.replace("```json","").replace("```","").strip()
+            # Sometimes Gemini prepends a sentence — find the first {
+            brace = raw.find("{")
+            if brace > 0: raw = raw[brace:]
+            result = json.loads(raw)
+            result = _normalise_ai_result(result, ACTIVE_SCHEME)
 
             _save_eval(student_id, "AI", _marks_from_result(result),
                        ai_feedback=result,
                        ai_confidence=result.get("overall_confidence"),
                        htr_text=result.get("htr_text",""))
-            return {"status":"success","ai_eval":result,"source":"gemini"}
+            return {"status":"success","ai_eval":result,"source":"gemini",
+                    "scheme_used": "structured" if use_structured else "pdf"}
 
         except Exception as e:
             print(f"Gemini error: {e}")
             import traceback; traceback.print_exc()
 
-    mock = {
-        "questions": {
-            "q1a": {"marks":4.5,"max":5,"feedback":"Strong conceptual understanding with correct formula.",
-                    "strengths":["Correct formula stated","Units used","Step-by-step working"],
-                    "weaknesses":["Final rounding not shown"],"suggestions":["Show rounding step"]},
-            "q1b": {"marks":3.5,"max":5,"feedback":"Correct approach but derivation incomplete.",
-                    "strengths":["Correct method","First three steps correct"],
-                    "weaknesses":["Last 2 steps missing","No conclusion"],"suggestions":["Complete derivation","Write conclusion"]}
-        },
-        "total":8.0,"max_total":10,"overall_confidence":0.88,"choice_conflict":False,
-        "htr_text":"Q1(a): F=ma, m=5kg, a=3m/s², F=15N. Q1(b): E=½mv²+mgh, differentiating...",
-        "general_feedback":"Solid understanding in Q1(a). Q1(b) needs complete derivations."
-    }
+    # Mock fallback — uses active scheme structure if available
+    if ACTIVE_SCHEME and ACTIVE_SCHEME.get("questions"):
+        mock_qs = {}
+        total   = 0.0
+        max_t   = float(ACTIVE_SCHEME.get("total_marks", 10))
+        for q in ACTIVE_SCHEME["questions"]:
+            for p in q.get("parts",[]):
+                key    = p.get("key","q1a")
+                maxM   = float(p.get("marks",5))
+                awarded= round(maxM * 0.80, 1)   # 80% mock score
+                total += awarded
+                mock_qs[key] = {
+                    "marks": awarded, "max": maxM,
+                    "feedback":    f"Adequate response for {p.get('label','?')} — key concepts present.",
+                    "strengths":   ["Correct approach identified","Working shown"],
+                    "weaknesses":  ["Some steps missing","Conclusion not stated"],
+                    "suggestions": ["Complete all derivation steps","State final answer clearly"]
+                }
+        mock = {
+            "questions": mock_qs,
+            "total": round(total, 1),
+            "max_total": max_t,
+            "overall_confidence": 0.85,
+            "choice_conflict": False,
+            "htr_text": "Mock evaluation — Gemini API not available or script not uploaded.",
+            "general_feedback": "Mock result (backend AI unavailable). Marks awarded at 80% of maximum per question."
+        }
+    else:
+        mock = {
+            "questions": {
+                "q1a": {"marks":4.5,"max":5,"feedback":"Strong conceptual understanding.",
+                        "strengths":["Correct formula","Units correct","Working shown"],
+                        "weaknesses":["Rounding not shown"],"suggestions":["Show rounding step"]},
+                "q1b": {"marks":3.5,"max":5,"feedback":"Correct approach, derivation incomplete.",
+                        "strengths":["Method correct","3 steps correct"],
+                        "weaknesses":["Last 2 steps missing","No conclusion"],
+                        "suggestions":["Complete derivation","Write conclusion"]}
+            },
+            "total":8.0,"max_total":10,"overall_confidence":0.88,"choice_conflict":False,
+            "htr_text":"Q1(a): F=ma, m=5kg, a=3m/s², F=15N. Q1(b): E=½mv²+mgh...",
+            "general_feedback":"Solid understanding. Q1(b) needs complete derivations."
+        }
+
     _save_eval(student_id, "AI", _marks_from_result(mock),
                ai_feedback=mock, ai_confidence=mock["overall_confidence"],
                htr_text=mock["htr_text"])
     return {"status":"success","ai_eval":mock,"source":"mock"}
 
-def _normalise_ai_result(result: dict) -> dict:
+def _normalise_ai_result(result: dict, scheme: dict = None) -> dict:
+    """Ensure result has a 'questions' dict. Fill in max marks from scheme if missing."""
     if "questions" not in result:
         questions = {}
-        for key in ["q1a","q1b","q1c","q2a","q2b","q2c","q3a","q3b"]:
+        for key in ["q1a","q1b","q1c","q2a","q2b","q2c","q3a","q3b","q3c"]:
             if key in result:
                 v = result[key]
                 questions[key] = v if isinstance(v, dict) else {"marks": v, "max": 5}
         result["questions"] = questions
+
+    # Fill in max values from scheme if Gemini didn't include them
+    if scheme and scheme.get("questions"):
+        scheme_maxes = {}
+        for q in scheme["questions"]:
+            for p in q.get("parts",[]):
+                scheme_maxes[p.get("key","")] = float(p.get("marks",5))
+        for key, qdata in result["questions"].items():
+            if isinstance(qdata, dict) and key in scheme_maxes:
+                if not qdata.get("max") or qdata["max"] == 5:
+                    qdata["max"] = scheme_maxes[key]
+
     return result
 
 def _marks_from_result(result: dict) -> dict:
