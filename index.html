@@ -1066,7 +1066,84 @@ body {
   .btn-commit { width: 100%; text-align: center; }
 }
 
-/* ─── Student self-registration screen ─── */
+/* ═══════════════════════════════════════════
+   TEMPLATES VIEW
+═══════════════════════════════════════════ */
+.tmpl-view { padding: 24px 28px; overflow-y: auto; flex: 1; background: var(--cream); }
+.tmpl-section {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 18px;
+}
+.tmpl-section-title {
+  font-family: 'Libre Baskerville', serif; font-size: 14px;
+  color: var(--text); margin-bottom: 14px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.q-builder-card {
+  border: 1px solid var(--border); border-radius: var(--r);
+  margin-bottom: 12px; overflow: hidden;
+}
+.q-builder-hdr {
+  background: var(--cream2); padding: 10px 14px;
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--border);
+}
+.q-builder-hdr-title { font-size: 12px; font-weight: 700; color: var(--text); }
+.q-builder-body { padding: 14px; }
+.part-row {
+  display: grid; grid-template-columns: 60px 60px 80px 80px 1fr 80px;
+  gap: 8px; align-items: start; margin-bottom: 8px;
+}
+.part-row-label {
+  font-size: 10px; font-weight: 700; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px;
+}
+.tmpl-input {
+  width: 100%; padding: 6px 9px; border: 1px solid var(--border2);
+  border-radius: var(--r); font-size: 12px; font-family: 'Plus Jakarta Sans', sans-serif;
+  color: var(--text); background: var(--cream); outline: none;
+}
+.tmpl-input:focus { border-color: var(--blue); background: var(--white); }
+.tmpl-textarea {
+  width: 100%; padding: 7px 10px; border: 1px solid var(--border2);
+  border-radius: var(--r); font-size: 11px; font-family: 'Plus Jakarta Sans', sans-serif;
+  color: var(--text); background: var(--cream); outline: none;
+  resize: vertical; min-height: 56px; line-height: 1.5;
+}
+.tmpl-textarea:focus { border-color: var(--blue); background: var(--white); }
+.btn-add-part {
+  font-size: 11px; color: var(--blue); background: var(--blue-lt);
+  border: 1px solid var(--blue-border); border-radius: var(--r);
+  padding: 4px 10px; cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.btn-remove { font-size: 11px; color: var(--red); background: var(--red-lt);
+  border: 1px solid var(--red-mid); border-radius: var(--r);
+  padding: 4px 8px; cursor: pointer; font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.tmpl-action-bar {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  padding: 16px 22px; background: var(--cream2);
+  border-top: 1px solid var(--border); border-radius: 0 0 var(--r-lg) var(--r-lg);
+}
+.or-badge {
+  font-size: 9px; font-weight: 700; background: var(--amber-lt);
+  color: var(--amber); border: 1px solid var(--amber-mid);
+  border-radius: 4px; padding: 1px 6px; letter-spacing: .05em;
+}
+.scheme-locked-banner {
+  background: var(--green-lt); border: 1px solid var(--green-mid);
+  border-radius: var(--r); padding: 10px 14px; margin-bottom: 14px;
+  font-size: 12px; color: var(--green); font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+
+/* ─── Scrollbar ─── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
 #screen-register {
   align-items: center; justify-content: center;
   background: linear-gradient(135deg, #f0ece3 0%, #e8e2d5 50%, #f5f2eb 100%);
@@ -1559,6 +1636,21 @@ let GLOBAL_PDFS = { 'question-paper': null, 'scheme': null };
 
 /* PDF_DB_AVAILABLE: tracks which students have scripts in Supabase */
 let PDF_DB = {};   // { 'STU-001': {has_script:true, has_scheme:true, has_qp:true} }
+
+/* SCHEME_DATA: structured scheme used for precise AI evaluation.
+   Built in the Templates tab and embedded directly into the Gemini prompt. */
+let SCHEME_DATA = {
+  exam_title:   '',
+  subject:      '',
+  total_marks:  0,
+  duration_hrs: 2,
+  questions: []
+  /* question shape: {
+       num: 'Q1', type: 'standard'|'or',
+       parts: [{key:'q1a', label:'(a)', marks:5, co:'CO1', bloom:'Apply',
+                description:'Describe...', model_answer:'...', keywords:['keyword1']}]
+     } */
+};
 
 /* Helper: get the best URL for a PDF.
    Priority: 1) Local blob (just uploaded this session)
@@ -2122,6 +2214,7 @@ async function registerUser() {
    APP
 ════════════════════════════════════════ */
 async function startApp() {
+  loadSchemeFromCache();   /* restore active scheme from localStorage */
   document.getElementById('tb-user').textContent = currentUser;
   const rEl = document.getElementById('tb-role');
   rEl.textContent = currentRole.toUpperCase();
@@ -2229,8 +2322,8 @@ document.addEventListener('click', e => {
 
 function buildTabs() {
   const tabsMap = {
-    faculty: ['📋 Evaluation', '📤 Upload Session', '📦 Bulk Upload'],
-    hod:     ['📊 Moderation', '📋 Evaluation', '📤 Upload Session', '📦 Bulk Upload'],
+    faculty: ['📋 Evaluation', '📤 Upload Session', '📦 Bulk Upload', '📝 Templates'],
+    hod:     ['📊 Moderation', '📋 Evaluation', '📤 Upload Session', '📦 Bulk Upload', '📝 Templates'],
     student: ['✍️ Self-Assessment'],
   };
   const tabs = tabsMap[currentRole] || ['📋 Evaluation'];
@@ -2246,8 +2339,8 @@ function switchTab(i) {
 }
 function renderView(i) {
   const views = {
-    faculty: [renderEvalView, renderUploadView, renderBulkUploadView],
-    hod:     [renderHodView, renderEvalView, renderUploadView, renderBulkUploadView],
+    faculty: [renderEvalView, renderUploadView, renderBulkUploadView, renderTemplatesView],
+    hod:     [renderHodView, renderEvalView, renderUploadView, renderBulkUploadView, renderTemplatesView],
     student: [renderStudentView],
   }[currentRole] || [renderEvalView];
   (views[i] || renderEvalView)();
@@ -2942,8 +3035,18 @@ function fillAI(inputId, v) {
 async function runAI() {
   const btn = document.getElementById('ai-btn');
   if (btn) {
-    btn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Analysing handwriting…';
+    btn.innerHTML = '<span style="animation:spin 1s linear infinite;display:inline-block">⟳</span> Analysing…';
     btn.style.opacity = '0.7'; btn.style.pointerEvents = 'none';
+  }
+
+  /* If we have a local structured scheme, push it to backend first */
+  if (SCHEME_DATA.questions && SCHEME_DATA.questions.length > 0) {
+    try {
+      await fetch(`${API}/set-scheme`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(SCHEME_DATA)
+      });
+    } catch {}
   }
 
   try {
@@ -3946,6 +4049,528 @@ function downloadCSVTemplate() {
 /* ════════════════════════════════════════
    TOAST
 ════════════════════════════════════════ */
+/* ════════════════════════════════════════
+   TEMPLATES — Question Paper & Scheme Builder
+   Faculty fills this form → AI gets exact
+   question/marks structure to evaluate against.
+════════════════════════════════════════ */
+
+function renderTemplatesView() {
+  const mc = document.getElementById('main-content');
+  mc.innerHTML = `<div class="tmpl-view" id="tmpl-view">${_buildTemplateHTML()}</div>`;
+}
+
+function _buildTemplateHTML() {
+  const locked = SCHEME_DATA.questions.length > 0 &&
+                 SCHEME_DATA.questions.every(q => q.parts && q.parts.length > 0);
+  return `
+  <div class="page-title">Templates</div>
+  <div class="page-sub">
+    Build your Question Paper and Scheme of Evaluation here.
+    The structured scheme is embedded directly into the AI prompt — Gemini will award marks
+    question by question exactly as you specify. No more guessing from PDFs.
+  </div>
+
+  ${locked ? `<div class="scheme-locked-banner">
+    ✅ Scheme active — AI will use this structured scheme for all evaluations.
+    <button onclick="clearScheme()" style="margin-left:auto;font-size:10px;background:transparent;
+      border:1px solid var(--green-mid);color:var(--green);border-radius:4px;
+      padding:2px 8px;cursor:pointer">Reset</button>
+  </div>` : ''}
+
+  <!-- Exam Info -->
+  <div class="tmpl-section">
+    <div class="tmpl-section-title">Exam Information</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 120px 120px;gap:12px">
+      <div>
+        <div class="part-row-label">Exam / Subject Title</div>
+        <input class="tmpl-input" id="tmpl-title" placeholder="e.g. Engineering Physics – IA 1"
+          value="${SCHEME_DATA.exam_title}" oninput="SCHEME_DATA.exam_title=this.value">
+      </div>
+      <div>
+        <div class="part-row-label">Subject Code</div>
+        <input class="tmpl-input" id="tmpl-subject" placeholder="e.g. 21PHY12"
+          value="${SCHEME_DATA.subject}" oninput="SCHEME_DATA.subject=this.value">
+      </div>
+      <div>
+        <div class="part-row-label">Total Marks</div>
+        <input class="tmpl-input" id="tmpl-total" type="number" placeholder="30"
+          value="${SCHEME_DATA.total_marks||''}"
+          oninput="SCHEME_DATA.total_marks=parseFloat(this.value)||0">
+      </div>
+      <div>
+        <div class="part-row-label">Duration (hrs)</div>
+        <input class="tmpl-input" id="tmpl-dur" type="number" step="0.5" placeholder="2"
+          value="${SCHEME_DATA.duration_hrs||''}"
+          oninput="SCHEME_DATA.duration_hrs=parseFloat(this.value)||2">
+      </div>
+    </div>
+  </div>
+
+  <!-- Questions -->
+  <div class="tmpl-section">
+    <div class="tmpl-section-title">
+      <span>Questions &amp; Marking Scheme</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn-add-part" onclick="addQuestion('standard')">+ Add Question</button>
+        <button class="btn-add-part" onclick="addQuestion('or')" style="color:var(--amber);
+          background:var(--amber-lt);border-color:var(--amber-mid)">+ Add OR Question</button>
+      </div>
+    </div>
+
+    <div style="background:var(--blue-lt);border:1px solid var(--blue-border);border-radius:var(--r);
+                padding:10px 13px;margin-bottom:14px;font-size:11px;color:var(--blue);line-height:1.6">
+      <strong>How to fill:</strong> Each question has sub-parts (a), (b), etc.
+      For each part enter: marks, CO, Bloom's level, description, model answer keywords.
+      The AI will award marks based on these keywords and description — be specific.
+      <strong>OR questions</strong> mean students answer Q1 OR Q2 (not both).
+    </div>
+
+    ${SCHEME_DATA.questions.length === 0 ? `
+    <div style="text-align:center;padding:28px;color:var(--text3);font-size:12px">
+      No questions added yet. Click "Add Question" or "Add OR Question" above.
+    </div>` : SCHEME_DATA.questions.map((q,qi) => _buildQuestionCard(q, qi)).join('')}
+  </div>
+
+  <!-- Summary -->
+  ${SCHEME_DATA.questions.length > 0 ? `
+  <div class="tmpl-section">
+    <div class="tmpl-section-title">Scheme Summary</div>
+    ${_buildSchemeSummary()}
+  </div>` : ''}
+
+  <!-- Action bar -->
+  <div class="tmpl-section" style="padding:0;overflow:hidden">
+    <div class="tmpl-action-bar">
+      <button class="btn-primary" style="padding:10px 20px;width:auto"
+        onclick="saveAndActivateScheme()">
+        ✅ Save &amp; Activate Scheme for AI
+      </button>
+      <button class="btn-green" style="padding:10px 20px;width:auto"
+        onclick="downloadQuestionPaperPDF()">
+        📋 Download Question Paper PDF
+      </button>
+      <button class="btn-green" style="padding:10px 20px;width:auto;background:var(--indigo)"
+        onclick="downloadSchemePDF()">
+        📐 Download Scheme of Evaluation PDF
+      </button>
+      <button style="padding:10px 16px;background:var(--cream2);border:1px solid var(--border2);
+                     border-radius:var(--r);font-size:12px;cursor:pointer;
+                     font-family:'Plus Jakarta Sans',sans-serif;color:var(--text2)"
+        onclick="loadSampleScheme()">
+        📄 Load Sample (IA Pattern)
+      </button>
+    </div>
+  </div>`;
+}
+
+function _buildQuestionCard(q, qi) {
+  const partLabels = ['(a)','(b)','(c)','(d)','(e)'];
+  return `
+  <div class="q-builder-card" id="qcard-${qi}">
+    <div class="q-builder-hdr">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="q-builder-hdr-title">Question ${qi+1}</span>
+        ${q.type==='or'?`<span class="or-badge">OR CHOICE</span>`:''}
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn-add-part" onclick="addPart(${qi})">+ Sub-part</button>
+        <button class="btn-remove" onclick="removeQuestion(${qi})">✕ Remove</button>
+      </div>
+    </div>
+    <div class="q-builder-body">
+      ${q.type === 'or' ? `
+      <div style="background:var(--amber-lt);border:1px solid var(--amber-mid);border-radius:var(--r);
+                  padding:8px 12px;margin-bottom:10px;font-size:11px;color:var(--amber)">
+        ⚡ OR Question — Students answer <strong>either</strong> this question
+        or the next one. AI will evaluate whichever was attempted.
+      </div>` : ''}
+
+      <!-- Column headers -->
+      <div class="part-row" style="margin-bottom:2px">
+        ${['Part','Marks','CO','Bloom','Description (what student must answer)',''].map(h=>
+          `<div class="part-row-label">${h}</div>`).join('')}
+      </div>
+
+      ${(q.parts||[]).map((p, pi) => `
+      <div class="part-row" id="part-${qi}-${pi}">
+        <div>
+          <input class="tmpl-input" value="${p.label||partLabels[pi]||'('+pi+')'}"
+            style="text-align:center"
+            oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].label=this.value;updateKey(${qi},${pi})">
+        </div>
+        <div>
+          <input class="tmpl-input" type="number" min="1" max="50" step="0.5"
+            value="${p.marks||''}" placeholder="5"
+            oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].marks=parseFloat(this.value)||0;refreshSummary()">
+        </div>
+        <div>
+          <input class="tmpl-input" value="${p.co||''}" placeholder="CO1"
+            oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].co=this.value">
+        </div>
+        <div>
+          <select class="tmpl-input" onchange="SCHEME_DATA.questions[${qi}].parts[${pi}].bloom=this.value">
+            ${['Remember','Understand','Apply','Analyse','Evaluate','Create'].map(b=>
+              `<option ${p.bloom===b?'selected':''}>${b}</option>`).join('')}
+          </select>
+        </div>
+        <div style="grid-column:span 1">
+          <textarea class="tmpl-textarea" placeholder="What must the student describe/derive/calculate? Be specific."
+            oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].description=this.value">${p.description||''}</textarea>
+          <input class="tmpl-input" style="margin-top:4px" placeholder="Model answer keywords (comma-separated)"
+            value="${p.keywords||''}"
+            oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].keywords=this.value">
+        </div>
+        <div style="padding-top:2px">
+          <button class="btn-remove" onclick="removePart(${qi},${pi})">✕</button>
+        </div>
+      </div>`).join('')}
+
+      ${(q.parts||[]).length === 0 ? `
+      <div style="text-align:center;padding:14px;color:var(--text3);font-size:11px">
+        Click "+ Sub-part" to add parts (a), (b)…
+      </div>` : ''}
+    </div>
+  </div>`;
+}
+
+function _buildSchemeSummary() {
+  let totalFromParts = 0;
+  const rows = SCHEME_DATA.questions.map((q,qi) => {
+    const qTotal = (q.parts||[]).reduce((s,p) => s+(parseFloat(p.marks)||0), 0);
+    totalFromParts += qTotal;
+    return `
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 0;
+                border-bottom:1px solid var(--border)">
+      <span style="font-weight:700;color:var(--text);font-size:12px;width:90px">
+        Q${qi+1}${q.type==='or'?' (OR)':''}
+      </span>
+      <span style="flex:1;font-size:11px;color:var(--text2)">
+        ${(q.parts||[]).map(p=>`${p.label||'?'} (${p.marks||0} marks)`).join(' + ')}
+      </span>
+      <span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--blue);font-size:13px">
+        ${qTotal} marks
+      </span>
+    </div>`;
+  }).join('');
+
+  const match = totalFromParts === (SCHEME_DATA.total_marks||0);
+  return `
+  ${rows}
+  <div style="display:flex;justify-content:space-between;padding:10px 0 0;font-weight:700">
+    <span style="font-size:13px;color:var(--text)">Total from questions</span>
+    <span style="font-family:'JetBrains Mono',monospace;font-size:15px;
+                 color:${match?'var(--green)':'var(--amber)'}">
+      ${totalFromParts}
+      ${SCHEME_DATA.total_marks ? ` / ${SCHEME_DATA.total_marks}` : ''}
+      ${!match && SCHEME_DATA.total_marks ? ' ⚠ mismatch' : ''}
+    </span>
+  </div>`;
+}
+
+/* ── Mutation helpers ── */
+function addQuestion(type) {
+  const qi   = SCHEME_DATA.questions.length;
+  const labels = [['(a)','(b)'],['(a)','(b)'],['(a)','(b)']];
+  SCHEME_DATA.questions.push({
+    num: `Q${qi+1}`, type,
+    parts: [
+      { key:`q${qi+1}a`, label:'(a)', marks:5, co:'CO1', bloom:'Apply', description:'', keywords:'' },
+      { key:`q${qi+1}b`, label:'(b)', marks:5, co:'CO1', bloom:'Apply', description:'', keywords:'' },
+    ]
+  });
+  refreshTemplateView();
+}
+
+function removeQuestion(qi) {
+  SCHEME_DATA.questions.splice(qi, 1);
+  refreshTemplateView();
+}
+
+function addPart(qi) {
+  const q      = SCHEME_DATA.questions[qi];
+  const pi     = q.parts.length;
+  const labels = ['(a)','(b)','(c)','(d)','(e)','(f)'];
+  q.parts.push({ key:`q${qi+1}${String.fromCharCode(97+pi)}`, label:labels[pi]||`(${pi})`,
+                 marks:5, co:'CO1', bloom:'Apply', description:'', keywords:'' });
+  refreshTemplateView();
+}
+
+function removePart(qi, pi) {
+  SCHEME_DATA.questions[qi].parts.splice(pi, 1);
+  refreshTemplateView();
+}
+
+function updateKey(qi, pi) {
+  const p = SCHEME_DATA.questions[qi].parts[pi];
+  const l = p.label.replace(/[^a-zA-Z0-9]/g,'').toLowerCase();
+  p.key   = `q${qi+1}${l}`;
+}
+
+function refreshTemplateView() {
+  const el = document.getElementById('tmpl-view');
+  if (el) el.innerHTML = _buildTemplateHTML();
+}
+
+function refreshSummary() {
+  /* Lightweight refresh — just update the summary section */
+  const el = document.getElementById('tmpl-view');
+  if (el) el.innerHTML = _buildTemplateHTML();
+}
+
+function clearScheme() {
+  if (!confirm('Clear the current scheme? This will not affect already-submitted AI evaluations.')) return;
+  SCHEME_DATA = { exam_title:'', subject:'', total_marks:0, duration_hrs:2, questions:[] };
+  refreshTemplateView();
+  toast('Scheme cleared', 'ok');
+}
+
+/* ── Save & activate: stores scheme JSON in localStorage + backend ── */
+async function saveAndActivateScheme() {
+  if (!SCHEME_DATA.questions.length) { toast('Add at least one question first', 'err'); return; }
+  if (!SCHEME_DATA.exam_title) { toast('Enter an exam title first', 'err'); return; }
+
+  /* Validate all parts have marks */
+  for (const q of SCHEME_DATA.questions) {
+    for (const p of q.parts) {
+      if (!p.marks || p.marks <= 0) {
+        toast(`${q.num} ${p.label} has no marks. Please fill in all marks.`, 'err'); return;
+      }
+    }
+  }
+
+  /* Save to localStorage */
+  try { localStorage.setItem('sde_scheme', JSON.stringify(SCHEME_DATA)); } catch {}
+
+  /* Post to backend */
+  try {
+    await fetch(`${API}/set-scheme`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(SCHEME_DATA)
+    });
+  } catch {}
+
+  toast('✅ Scheme activated — AI will use this structure for all evaluations', 'ok');
+  addNotif(`Scheme activated: ${SCHEME_DATA.exam_title} (${SCHEME_DATA.total_marks} marks)`, 'info');
+  refreshTemplateView();
+}
+
+/* ── Load scheme from localStorage on startup ── */
+function loadSchemeFromCache() {
+  try {
+    const s = localStorage.getItem('sde_scheme');
+    if (s) { Object.assign(SCHEME_DATA, JSON.parse(s)); }
+  } catch {}
+}
+
+/* ── Sample IA exam pattern ── */
+function loadSampleScheme() {
+  SCHEME_DATA = {
+    exam_title:   'Engineering Physics — Internal Assessment 1',
+    subject:      '21PHY12',
+    total_marks:  30,
+    duration_hrs: 1.5,
+    questions: [
+      {
+        num:'Q1', type:'standard',
+        parts:[
+          { key:'q1a', label:'(a)', marks:5, co:'CO1', bloom:'Understand',
+            description:'State and explain Newton\'s second law of motion. Derive F=ma.',
+            keywords:'Newton,second law,F=ma,net force,acceleration,mass,derivation' },
+          { key:'q1b', label:'(b)', marks:5, co:'CO1', bloom:'Apply',
+            description:'A body of mass 5kg is acted upon by a force of 20N. Calculate acceleration.',
+            keywords:'F=ma,5kg,20N,a=4m/s2,substitution,units,answer' },
+        ]
+      },
+      {
+        num:'Q2', type:'or',
+        parts:[
+          { key:'q2a', label:'(a)', marks:5, co:'CO2', bloom:'Understand',
+            description:'Define simple harmonic motion. State the conditions for SHM.',
+            keywords:'SHM,periodic,restoring force,proportional,displacement,conditions' },
+          { key:'q2b', label:'(b)', marks:5, co:'CO2', bloom:'Analyse',
+            description:'Derive the expression for time period of a simple pendulum.',
+            keywords:'pendulum,T=2π√(l/g),derivation,length,gravity,time period' },
+        ]
+      },
+      {
+        num:'Q3', type:'or',
+        parts:[
+          { key:'q3a', label:'(a)', marks:5, co:'CO2', bloom:'Apply',
+            description:'A simple pendulum has length 1m. Find time period (g=9.8m/s²).',
+            keywords:'T=2π√(l/g),1m,9.8,T≈2.006s,substitution,units' },
+          { key:'q3b', label:'(b)', marks:5, co:'CO3', bloom:'Understand',
+            description:'Explain Hooke\'s law and state the stress-strain relationship.',
+            keywords:'Hooke,stress,strain,proportional,elastic limit,Young\'s modulus' },
+        ]
+      },
+    ]
+  };
+  try { localStorage.setItem('sde_scheme', JSON.stringify(SCHEME_DATA)); } catch {}
+  refreshTemplateView();
+  toast('Sample IA scheme loaded', 'ok');
+}
+
+/* ── Download Question Paper PDF (HTML printed to PDF) ── */
+function downloadQuestionPaperPDF() {
+  if (!SCHEME_DATA.questions.length) { toast('Add questions first', 'err'); return; }
+
+  const date  = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const qRows = SCHEME_DATA.questions.map((q,qi) => {
+    const qTotal = (q.parts||[]).reduce((s,p)=>s+(parseFloat(p.marks)||0),0);
+    const partsHtml = (q.parts||[]).map((p,pi) => `
+      <div style="margin:${pi>0?'14px':0} 0 0 18px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <span><strong>${p.label}</strong> ${p.description||'[Question description]'}</span>
+          <span style="font-family:monospace;font-weight:700;white-space:nowrap;margin-left:12px">
+            [${p.marks} Marks]
+          </span>
+        </div>
+        <div style="font-size:10px;color:#9c9488;margin-top:2px">
+          CO: ${p.co||'—'} | Bloom's: ${p.bloom||'—'}
+        </div>
+      </div>`).join('');
+
+    return `
+    <div style="margin-bottom:20px;padding:16px;border:1px solid #ddd8cc;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <strong style="font-size:14px">Q${qi+1}${q.type==='or'?' (OR — attempt either Q'+qi+' or Q'+(qi+2)+'.)':''}</strong>
+        <span style="font-family:monospace;color:#1d4ed8;font-weight:700">${qTotal} Marks</span>
+      </div>
+      ${partsHtml}
+    </div>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head>
+<title>Question Paper — ${SCHEME_DATA.exam_title||'Exam'}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Georgia,serif;color:#1e1c18;background:white;font-size:13px;line-height:1.6}
+  @page{size:A4;margin:20mm}
+  @media print{.no-print{display:none}}
+  .header{text-align:center;padding:0 0 16px;border-bottom:2px solid #1e1c18;margin-bottom:20px}
+  .title{font-size:18px;font-weight:700;letter-spacing:.02em}
+  .meta-row{display:flex;justify-content:space-between;margin-top:8px;font-size:12px}
+  .instructions{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;
+    padding:12px 16px;margin-bottom:20px;font-size:12px}
+</style>
+</head><body>
+<div class="header">
+  <div style="font-size:11px;letter-spacing:.08em;color:#5a5649;margin-bottom:4px">
+    SHIVA'S DIGITAL EVALUATION PORTAL
+  </div>
+  <div class="title">${SCHEME_DATA.exam_title||'Question Paper'}</div>
+  <div style="font-size:12px;color:#5a5649;margin-top:2px">
+    Subject Code: ${SCHEME_DATA.subject||'—'}
+  </div>
+  <div class="meta-row">
+    <span>Date: ${date}</span>
+    <span>Duration: ${SCHEME_DATA.duration_hrs||2} Hours</span>
+    <span>Max Marks: ${SCHEME_DATA.total_marks||0}</span>
+  </div>
+</div>
+
+<div class="instructions">
+  <strong>Instructions:</strong>
+  Answer all questions. OR questions — attempt <em>either</em> part, not both.
+  Write clearly and show all working. Use blue/black pen only.
+</div>
+
+${qRows}
+
+<div class="no-print" style="text-align:center;margin-top:28px">
+  <button onclick="window.print()" style="padding:10px 28px;background:#1e1c18;color:white;
+    border:none;border-radius:8px;font-size:13px;cursor:pointer">🖨️ Print / Save as PDF</button>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 600);
+}
+
+/* ── Download Scheme of Evaluation PDF ── */
+function downloadSchemePDF() {
+  if (!SCHEME_DATA.questions.length) { toast('Add questions first', 'err'); return; }
+
+  const date  = new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+  const qRows = SCHEME_DATA.questions.map((q,qi) => {
+    const qTotal = (q.parts||[]).reduce((s,p)=>s+(parseFloat(p.marks)||0),0);
+    const partsHtml = (q.parts||[]).map(p => `
+      <tr>
+        <td style="padding:8px 12px;font-weight:600;white-space:nowrap">Q${qi+1} ${p.label}</td>
+        <td style="padding:8px 12px;text-align:center;font-family:monospace;font-weight:700;color:#1d4ed8">${p.marks}</td>
+        <td style="padding:8px 12px;font-size:11px;color:#5a5649">${p.description||'—'}</td>
+        <td style="padding:8px 12px;font-size:11px">
+          ${(p.keywords||'').split(',').map(k=>k.trim()).filter(Boolean).map(k=>
+            `<span style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:3px;
+                          padding:1px 5px;font-size:10px;margin:1px;display:inline-block">${k}</span>`
+          ).join('')}
+        </td>
+        <td style="padding:8px 12px;text-align:center;font-size:11px;color:#9c9488">${p.co||'—'}</td>
+        <td style="padding:8px 12px;text-align:center;font-size:11px;color:#9c9488">${p.bloom||'—'}</td>
+      </tr>`).join('');
+    return `
+    <tr style="background:#1e1c18">
+      <td colspan="6" style="padding:8px 12px;color:white;font-weight:700;font-size:12px">
+        Question ${qi+1}${q.type==='or'?' — OR CHOICE':''} &nbsp; [Total: ${qTotal} marks]
+      </td>
+    </tr>
+    ${partsHtml}`;
+  }).join('');
+
+  const html = `<!DOCTYPE html><html><head>
+<title>Scheme of Evaluation — ${SCHEME_DATA.exam_title||'Exam'}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Georgia,serif;color:#1e1c18;background:white;font-size:13px}
+  @page{size:A4 landscape;margin:15mm}
+  @media print{.no-print{display:none}}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #ddd8cc}
+  th{background:#eff6ff;padding:8px 12px;font-size:11px;text-align:left;letter-spacing:.04em}
+</style>
+</head><body>
+<div style="text-align:center;padding:0 0 14px;border-bottom:2px solid #1e1c18;margin-bottom:16px">
+  <div style="font-size:10px;letter-spacing:.1em;color:#9c9488">SCHEME OF EVALUATION — CONFIDENTIAL</div>
+  <div style="font-size:18px;font-weight:700;margin:4px 0">${SCHEME_DATA.exam_title||'Exam'}</div>
+  <div style="font-size:12px;color:#5a5649">
+    ${SCHEME_DATA.subject||''} &nbsp;·&nbsp; Total: ${SCHEME_DATA.total_marks||0} Marks
+    &nbsp;·&nbsp; Generated: ${date}
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:80px">Question</th>
+      <th style="width:60px;text-align:center">Marks</th>
+      <th>Description / Expected Answer</th>
+      <th>Marking Keywords</th>
+      <th style="width:60px;text-align:center">CO</th>
+      <th style="width:80px;text-align:center">Bloom's</th>
+    </tr>
+  </thead>
+  <tbody>${qRows}</tbody>
+</table>
+
+<div style="margin-top:14px;font-size:11px;color:#9c9488;text-align:center">
+  Award full marks only if keywords and description are addressed. Partial credit for correct method.
+</div>
+
+<div class="no-print" style="text-align:center;margin-top:24px">
+  <button onclick="window.print()" style="padding:10px 28px;background:#1d4ed8;color:white;
+    border:none;border-radius:8px;font-size:13px;cursor:pointer">🖨️ Print / Save as PDF</button>
+</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 600);
+}
+
 function toast(msg, type='') {
   const el = document.getElementById('toast');
   el.textContent = msg;
