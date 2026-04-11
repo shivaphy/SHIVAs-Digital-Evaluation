@@ -1,0 +1,11 @@
+fastapi[standard]
+uvicorn[standard]
+google-generativeai
+python-multipart
+python-dotenv
+psycopg2-binary
+pillow
+pdf2image
+pydantic
+aiofiles
+httpx
