@@ -305,6 +305,21 @@ async def bulk_register(students: List[StudentRecord]):
         )
     return {"status": "ok", "count": len(students)}
 
+@app.delete("/students/{student_id}")
+async def delete_student(student_id: str):
+    """Delete a student and all their evaluation data."""
+    # Get username to also remove user account
+    row = db_exec("SELECT username FROM students WHERE student_id=%s", (student_id,), fetch="one")
+    db_exec("DELETE FROM evaluations    WHERE student_id=%s", (student_id,))
+    db_exec("DELETE FROM final_decisions WHERE student_id=%s", (student_id,))
+    db_exec("DELETE FROM exam_sessions   WHERE student_id=%s", (student_id,))
+    db_exec("DELETE FROM audit_log       WHERE student_id=%s", (student_id,))
+    db_exec("DELETE FROM students        WHERE student_id=%s", (student_id,))
+    if row and row.get("username"):
+        db_exec("DELETE FROM users WHERE username=%s AND role='student'", (row["username"],))
+    audit("student_deleted", student_id, "faculty", {"student_id": student_id})
+    return {"status": "deleted", "student_id": student_id}
+
 # ═══════════════════════════════════════
 # PDF FILE STORAGE — Priority 2
 # PDFs stored as base64 in exam_sessions table.

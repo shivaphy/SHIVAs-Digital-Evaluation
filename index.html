@@ -1138,6 +1138,43 @@ body {
   display: flex; align-items: center; gap: 8px;
 }
 
+/* ── Math toolbar ── */
+.math-toolbar {
+  display: flex; flex-wrap: wrap; gap: 3px;
+  padding: 5px 6px; background: var(--cream2);
+  border: 1px solid var(--border); border-radius: var(--r);
+  margin-bottom: 4px;
+}
+.math-btn {
+  font-size: 12px; padding: 3px 7px; border-radius: 3px;
+  background: var(--white); border: 1px solid var(--border2);
+  cursor: pointer; font-family: 'JetBrains Mono', monospace;
+  color: var(--text); line-height: 1.4; transition: all .1s;
+}
+.math-btn:hover { background: var(--blue); color: white; border-color: var(--blue); }
+.math-toolbar-label {
+  font-size: 9px; font-weight: 700; color: var(--text3);
+  text-transform: uppercase; letter-spacing: .06em;
+  width: 100%; padding: 2px 0 4px; margin-bottom: 2px;
+}
+
+/* ── Student delete in sidebar ── */
+.stu-item { position: relative; }
+.stu-item-del {
+  display: none; position: absolute; top: 4px; right: 4px;
+  font-size: 9px; padding: 2px 5px; border-radius: 3px;
+  background: var(--red-lt); color: var(--red);
+  border: 1px solid var(--red-mid); cursor: pointer; line-height: 1.4;
+}
+.stu-item:hover .stu-item-del { display: block; }
+
+/* ── Render env warning ── */
+.env-warning {
+  background: #fef3c7; border: 1px solid #f59e0b;
+  border-radius: var(--r); padding: 10px 14px; margin-bottom: 12px;
+  font-size: 11px; color: #92400e; line-height: 1.6;
+}
+
 /* ─── Scrollbar ─── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -2572,6 +2609,8 @@ function renderStuList() {
     const hasStu = !!(ev.STUDENT && ev.STUDENT.total);
     return `
     <div class="stu-item ${s.id===currentStudent?'active':''}" onclick="selectStu('${s.id}')">
+      <button class="stu-item-del" onclick="event.stopPropagation();deleteStudent('${s.id}')"
+        title="Remove student">✕</button>
       <div style="display:flex;justify-content:space-between;align-items:flex-start">
         <div class="stu-id">${s.id}</div>
         ${fin ? `<span style="font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--green);font-weight:700">✓FIN</span>` : ''}
@@ -2590,12 +2629,38 @@ function selectStu(id) {
   currentStudent = id;
   activeQBlock = 'Q1';
   renderStuList();
-  /* Check if this student has PDFs in DB (async, non-blocking) */
-  checkPdfsInDB(id).then(dbPdfs => {
-    /* If DB has a script but we don't have a local blob, PDF_DB is already updated */
-    /* Re-render eval right so PDF viewer shows correctly */
-    renderEvalRight();
-  });
+  checkPdfsInDB(id).then(() => renderEvalRight());
+}
+
+async function deleteStudent(sid) {
+  const stu = STUDENTS.find(s => s.id === sid);
+  if (!stu) return;
+  if (!confirm(`Remove "${stu.name}" (${sid}) and all their evaluation data?\n\nThis cannot be undone.`)) return;
+
+  /* Remove from local state */
+  const idx = STUDENTS.findIndex(s => s.id === sid);
+  if (idx > -1) STUDENTS.splice(idx, 1);
+  delete EVALS[sid];
+  delete FINALIZED[sid];
+  delete PDF_DB[sid];
+  if (STU_PDFS[sid]) { URL.revokeObjectURL(STU_PDFS[sid]?.['answer-script']); delete STU_PDFS[sid]; }
+
+  /* Move selection to first remaining student */
+  if (currentStudent === sid) {
+    currentStudent = STUDENTS[0]?.id || '';
+  }
+
+  saveSession();
+  logAudit(sid, 'Student deleted', currentUser, { name: stu.name });
+
+  /* Delete from backend */
+  try {
+    await fetch(`${API}/students/${encodeURIComponent(sid)}`, { method: 'DELETE' });
+  } catch {}
+
+  toast(`${stu.name} removed`, 'ok');
+  renderStuList();
+  renderEvalRight();
 }
 
 function renderEvalRight() {
@@ -2695,7 +2760,18 @@ function renderEvalRight() {
 
           <div class="ai-card-body" id="ai-card-body">
 
-            ${/* HTR extracted text */ ai.htr ? `
+            ${/* Mock warning — shown when Gemini API key is not configured */
+            ai.htr && ai.htr.includes('Mock') ? `
+            <div class="env-warning">
+              <strong>⚠ Mock Result — Gemini API not configured.</strong><br>
+              To enable real AI handwriting analysis:<br>
+              1. Go to <strong>Render.com → your service → Environment</strong><br>
+              2. Add variable: <code style="background:#fff;padding:1px 5px;border-radius:3px;font-family:monospace">GEMINI_API_KEY</code> = your key<br>
+              3. Get a free key at <strong>aistudio.google.com</strong> → "Get API Key"<br>
+              4. Click <strong>Save Changes</strong> — Render redeploys automatically (≈3 min)
+            </div>` : ''}
+
+            ${/* HTR extracted text */ ai.htr && !ai.htr.includes('Mock') ? `
             <div class="ai-htr-box">
               <div class="ai-htr-label">📝 Extracted Handwriting (HTR)</div>
               <div class="ai-htr-text">${ai.htr}</div>
@@ -3136,8 +3212,14 @@ async function runAI() {
 
   saveSession();
   renderEvalRight();
-  addNotif(`AI analysis complete for ${STUDENTS.find(s=>s.id===currentStudent)?.name||currentStudent}`, 'info');
-  toast('AI analysis complete ✦', 'ok');
+  const stuName = STUDENTS.find(s=>s.id===currentStudent)?.name || currentStudent;
+  if (d.source === 'mock') {
+    addNotif(`⚠ AI used mock data for ${stuName} — Gemini API key not set on Render`, 'warn');
+    toast('⚠ Mock result — set GEMINI_API_KEY on Render to enable real AI', 'err');
+  } else {
+    addNotif(`AI analysis complete for ${stuName}`, 'info');
+    toast('AI analysis complete ✦', 'ok');
+  }
 }
 
 function toggleAiCard() {
@@ -4082,6 +4164,19 @@ function downloadCSVTemplate() {
 /* ════════════════════════════════════════
    TOAST
 ════════════════════════════════════════ */
+/* ── Insert math symbol at cursor position in a textarea/input ── */
+function insertMath(elId, symbol) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.focus();
+  const start = el.selectionStart ?? el.value.length;
+  const end   = el.selectionEnd   ?? el.value.length;
+  el.value = el.value.slice(0, start) + symbol + el.value.slice(end);
+  el.selectionStart = el.selectionEnd = start + symbol.length;
+  /* Trigger oninput manually so SCHEME_DATA stays in sync */
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 /* ════════════════════════════════════════
    TEMPLATES — Question Paper & Scheme Builder
    Faculty fills this form → AI gets exact
@@ -4248,9 +4343,58 @@ function _buildQuestionCard(q, qi) {
           </select>
         </div>
         <div style="grid-column:span 1">
-          <textarea class="tmpl-textarea" placeholder="What must the student describe/derive/calculate? Be specific."
+          <div class="math-toolbar" id="mtb-${qi}-${pi}">
+            <div class="math-toolbar-label">Insert: click a symbol then type in the box below</div>
+            ${[
+              ['Operators',  ['×','÷','±','≈','≠','≤','≥','∝','∞','→','⟹']],
+              ['Fractions',  ['½','⅓','¼','⅔','¾']],
+              ['Powers',     ['²','³','⁴','⁻¹','⁻²','√','∛']],
+              ['Greek',      ['α','β','γ','δ','θ','λ','μ','π','σ','τ','φ','ω','Δ','Σ','Ω']],
+              ['Physics',    ['°C','Ω','μF','μH','∫','∂','∇','⊥','∥','Ω·m']],
+              ['Notation',   ['∴','∵','⇒','⟺','∈','∉','∪','∩']],
+            ].map(([grp, syms]) => `
+              <div class="math-toolbar-label" style="width:100%;margin-top:4px">${grp}</div>
+              ${syms.map(s => `<button type="button" class="math-btn"
+                onclick="insertMath('desc-${qi}-${pi}','${s.replace(/'/g,'\\\'')}')">${s}</button>`).join('')}
+            `).join('')}
+            <div class="math-toolbar-label" style="width:100%;margin-top:4px">
+              Common Equations (inserts as text — works in both description and PDF)
+            </div>
+            ${[
+              ['F=ma',             'F = ma'],
+              ['v=u+at',           'v = u + at'],
+              ['s=ut+½at²',        's = ut + ½at²'],
+              ['KE=½mv²',          'KE = ½mv²'],
+              ['PE=mgh',           'PE = mgh'],
+              ['E=mc²',            'E = mc²'],
+              ['F=qvB',            'F = qvB sinθ'],
+              ['V=IR',             'V = IR'],
+              ['P=IV',             'P = IV'],
+              ['T=2π√(l/g)',       'T = 2π√(l/g)'],
+              ['f=1/T',            'f = 1/T'],
+              ['λ=v/f',            'λ = v/f'],
+              ['n=c/v',            'n = c/v'],
+              ['τ=rF sinθ',        'τ = rF sinθ'],
+              ['W=Fd cosθ',        'W = Fd cosθ'],
+              ['pV=nRT',           'pV = nRT'],
+              ['ΔQ=mcΔT',          'ΔQ = mcΔT'],
+              ['PV=constant',      'P₁V₁ = P₂V₂'],
+              ['F=kq₁q₂/r²',      'F = kq₁q₂/r²'],
+              ['E=hν',             'E = hν'],
+            ].map(([lbl, eq]) => `<button type="button" class="math-btn" style="font-size:10px"
+              onclick="insertMath('desc-${qi}-${pi}','${eq.replace(/'/g,'\\\'')}')">${lbl}</button>`).join('')}
+          </div>
+          <textarea class="tmpl-textarea" id="desc-${qi}-${pi}"
+            placeholder="What must the student describe/derive/calculate? Use symbol buttons above. e.g: Derive F=ma using Newton's 2nd law. Show that F=d(mv)/dt → F=ma for constant mass."
             oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].description=this.value">${p.description||''}</textarea>
-          <input class="tmpl-input" style="margin-top:4px" placeholder="Model answer keywords (comma-separated)"
+          <div class="math-toolbar" style="margin-top:4px;margin-bottom:2px">
+            <div class="math-toolbar-label">Keywords (AI checks these in student answers)</div>
+            ${[['Common',['F=ma','v=u+at','s=ut+½at²','E=mc²','P=IV','V=IR','F=qvB','τ=rF']]]
+              .map(([,syms]) => syms.map(s => `<button type="button" class="math-btn" style="font-size:10px"
+                onclick="insertMath('kw-${qi}-${pi}','${s.replace(/'/g,'\\\'')}, ')">${s}</button>`).join('')).join('')}
+          </div>
+          <input class="tmpl-input" id="kw-${qi}-${pi}"
+            style="margin-top:0" placeholder="Keywords comma-separated: F=ma, acceleration, mass, Newton, units"
             value="${p.keywords||''}"
             oninput="SCHEME_DATA.questions[${qi}].parts[${pi}].keywords=this.value">
         </div>
@@ -4476,6 +4620,7 @@ function downloadQuestionPaperPDF() {
 
   const html = `<!DOCTYPE html><html><head>
 <title>Question Paper — ${SCHEME_DATA.exam_title||'Exam'}</title>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"><\/script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Georgia,serif;color:#1e1c18;background:white;font-size:13px;line-height:1.6}
@@ -4515,12 +4660,19 @@ ${qRows}
   <button onclick="window.print()" style="padding:10px 28px;background:#1e1c18;color:white;
     border:none;border-radius:8px;font-size:13px;cursor:pointer">🖨️ Print / Save as PDF</button>
 </div>
+<script>
+/* Wait for MathJax to finish before auto-printing */
+if (window.MathJax) {
+  MathJax.startup.promise.then(() => window.print());
+} else {
+  setTimeout(() => window.print(), 1200);
+}
+<\/script>
 </body></html>`;
 
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
-  setTimeout(() => w.print(), 600);
 }
 
 /* ── Download Scheme of Evaluation PDF ── */
@@ -4555,6 +4707,7 @@ function downloadSchemePDF() {
 
   const html = `<!DOCTYPE html><html><head>
 <title>Scheme of Evaluation — ${SCHEME_DATA.exam_title||'Exam'}</title>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"><\/script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Georgia,serif;color:#1e1c18;background:white;font-size:13px}
@@ -4596,12 +4749,18 @@ function downloadSchemePDF() {
   <button onclick="window.print()" style="padding:10px 28px;background:#1d4ed8;color:white;
     border:none;border-radius:8px;font-size:13px;cursor:pointer">🖨️ Print / Save as PDF</button>
 </div>
+<script>
+if (window.MathJax) {
+  MathJax.startup.promise.then(() => window.print());
+} else {
+  setTimeout(() => window.print(), 1200);
+}
+<\/script>
 </body></html>`;
 
   const w = window.open('', '_blank');
   w.document.write(html);
   w.document.close();
-  setTimeout(() => w.print(), 600);
 }
 
 function toast(msg, type='') {
