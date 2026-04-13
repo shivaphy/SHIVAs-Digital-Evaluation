@@ -1,11 +1,9 @@
 fastapi[standard]
 uvicorn[standard]
-google-generativeai
+google-genai
 python-multipart
 python-dotenv
 psycopg2-binary
-pillow
-pdf2image
 pydantic
 aiofiles
 httpx

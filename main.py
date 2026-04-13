@@ -13,24 +13,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import Response
 from pydantic import BaseModel
-import google.generativeai as genai
 import psycopg2, psycopg2.extras, uvicorn
 
 # ═══════════════════════════════════════
 # CONFIG
 # ═══════════════════════════════════════
-GEMINI_KEY   = os.getenv("GEMINI_API_KEY", "").strip()   # .strip() removes accidental whitespace
+GEMINI_KEY   = os.getenv("GEMINI_API_KEY", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL",   "").strip()
 
-# Configure Gemini immediately — also expose a /health check for it
-_gemini_ok = False
+# New google-genai SDK (replaces deprecated google-generativeai)
+_gemini_client = None
+_gemini_ok     = False
 if GEMINI_KEY:
     try:
-        genai.configure(api_key=GEMINI_KEY)
-        _gemini_ok = True
-        print(f"✅ Gemini configured (key length: {len(GEMINI_KEY)})")
+        from google import genai as _genai
+        _gemini_client = _genai.Client(api_key=GEMINI_KEY)
+        _gemini_ok     = True
+        print(f"✅ Gemini client ready (key length: {len(GEMINI_KEY)})")
     except Exception as _ge:
-        print(f"❌ Gemini configure error: {_ge}")
+        print(f"❌ Gemini init error: {_ge}")
 else:
     print("⚠ GEMINI_API_KEY not set — AI will use mock responses")
 
@@ -565,46 +566,49 @@ async def run_ai_analysis(student_id: str):
     print(f"run_ai_analysis: student={student_id} | "
           f"has_script={has_script} | gemini_ok={_gemini_ok} | key_len={len(GEMINI_KEY)}")
 
-    if has_script and _gemini_ok:
+    if has_script and _gemini_ok and _gemini_client:
         try:
+            from google import genai as _genai
+            from google.genai import types as _gtypes
+
             use_structured = bool(ACTIVE_SCHEME and ACTIVE_SCHEME.get("questions"))
+            prompt_text = (_build_structured_prompt(ACTIVE_SCHEME) if use_structured
+                           else _build_pdf_fallback_prompt())
+            print(f"Prompt mode: {'STRUCTURED' if use_structured else 'PDF-fallback'}")
 
-            # Build text prompt
-            if use_structured:
-                prompt_text = _build_structured_prompt(ACTIVE_SCHEME)
-                print(f"STRUCTURED scheme: {ACTIVE_SCHEME.get('exam_title')}")
-            else:
-                prompt_text = _build_pdf_fallback_prompt()
-                print("PDF-fallback prompt (no structured scheme)")
-
-            # Build content list — correct format for Gemini multimodal:
-            # text string + inline_data dicts (base64 already, no decode needed)
-            content = [prompt_text]
+            # Build parts list using new SDK types
+            parts = [_gtypes.Part.from_text(text=prompt_text)]
 
             if not use_structured and session.get("scheme_b64"):
-                content.append({"inline_data": {
-                    "mime_type": "application/pdf",
-                    "data": session["scheme_b64"]   # already base64 string from DB
-                }})
+                parts.append(_gtypes.Part.from_bytes(
+                    data=base64.b64decode(session["scheme_b64"]),
+                    mime_type="application/pdf"
+                ))
             if not use_structured and session.get("qp_b64"):
-                content.append({"inline_data": {
-                    "mime_type": "application/pdf",
-                    "data": session["qp_b64"]
-                }})
-            # Answer script always last
-            content.append({"inline_data": {
-                "mime_type": "application/pdf",
-                "data": session["script_b64"]
-            }})
+                parts.append(_gtypes.Part.from_bytes(
+                    data=base64.b64decode(session["qp_b64"]),
+                    mime_type="application/pdf"
+                ))
+            # Answer script always included
+            parts.append(_gtypes.Part.from_bytes(
+                data=base64.b64decode(session["script_b64"]),
+                mime_type="application/pdf"
+            ))
 
             result = None
             last_error = ""
-            for model_name in ["gemini-1.5-flash", "gemini-2.0-flash",
+            for model_name in ["gemini-2.0-flash", "gemini-1.5-flash",
                                 "gemini-1.5-flash-latest", "gemini-1.5-pro"]:
                 try:
                     print(f"Trying {model_name}…")
-                    model    = genai.GenerativeModel(model_name)
-                    response = model.generate_content(content)
+                    response = _gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=parts,
+                        config=_gtypes.GenerateContentConfig(
+                            temperature=0.1,      # low temp for deterministic marking
+                            max_output_tokens=4096,
+                        )
+                    )
                     raw = response.text.strip()
                     raw = raw.replace("```json","").replace("```","").strip()
                     brace = raw.find("{")
@@ -614,12 +618,12 @@ async def run_ai_analysis(student_id: str):
                     print(f"✅ Success with {model_name}")
                     break
                 except json.JSONDecodeError as je:
-                    last_error = f"JSON error: {je}"
-                    print(f"{model_name} JSON error: {je}")
+                    last_error = f"JSON error ({model_name}): {je}"
+                    print(last_error)
                     continue
                 except Exception as me:
-                    last_error = f"{type(me).__name__}: {me}"
-                    print(f"{model_name} error: {last_error}")
+                    last_error = f"{model_name}: {type(me).__name__}: {me}"
+                    print(last_error)
                     continue
 
             if result:
@@ -633,7 +637,7 @@ async def run_ai_analysis(student_id: str):
                 print(f"❌ All models failed. Last error: {last_error}")
 
         except Exception as e:
-            print(f"❌ Outer error: {type(e).__name__}: {e}")
+            print(f"❌ Outer Gemini error: {type(e).__name__}: {e}")
             import traceback; traceback.print_exc()
 
     # ── Mock fallback ──────────────────────────────────────────────
