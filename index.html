@@ -3214,10 +3214,16 @@ async function runAI() {
   renderEvalRight();
   const stuName = STUDENTS.find(s=>s.id===currentStudent)?.name || currentStudent;
   if (d.source === 'mock') {
-    addNotif(`⚠ AI used mock data for ${stuName} — Gemini API key not set on Render`, 'warn');
-    toast('⚠ Mock result — set GEMINI_API_KEY on Render to enable real AI', 'err');
+    const reasonMap = {
+      'no_script':   '❌ No answer script uploaded for this student. Upload it in the Upload Session tab first.',
+      'no_api_key':  '❌ GEMINI_API_KEY not set on Render. Add it in Render → Environment.',
+      'gemini_error':'❌ Gemini returned an error. Check Render logs for details.',
+    };
+    const reasonMsg = reasonMap[d.reason] || '❌ AI unavailable — check /health endpoint.';
+    addNotif(`⚠ Mock result for ${stuName}: ${d.reason||'unknown'}`, 'warn');
+    toast(`⚠ Mock: ${reasonMsg}`, 'err');
   } else {
-    addNotif(`AI analysis complete for ${stuName}`, 'info');
+    addNotif(`✅ AI analysis complete for ${stuName} (${d.scheme_used||'pdf'} scheme)`, 'info');
     toast('AI analysis complete ✦', 'ok');
   }
 }

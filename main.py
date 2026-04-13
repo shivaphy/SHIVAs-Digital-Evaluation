@@ -1,7 +1,6 @@
 """
-SHIVA'S Digital Evaluation — Backend API v4.0
-Priority 1: Full Supabase persistent storage (users, students, evals, finals)
-Priority 2: PDF file storage in Supabase (no S3 needed)
+SHIVA'S Digital Evaluation — Backend API v4.1
+Fixed: Gemini API initialisation, model name, parts list construction
 """
 
 import os, json, base64, hashlib
@@ -20,10 +19,20 @@ import psycopg2, psycopg2.extras, uvicorn
 # ═══════════════════════════════════════
 # CONFIG
 # ═══════════════════════════════════════
-GEMINI_KEY   = os.getenv("GEMINI_API_KEY", "")
-DATABASE_URL = os.getenv("DATABASE_URL",   "")
+GEMINI_KEY   = os.getenv("GEMINI_API_KEY", "").strip()   # .strip() removes accidental whitespace
+DATABASE_URL = os.getenv("DATABASE_URL",   "").strip()
+
+# Configure Gemini immediately — also expose a /health check for it
+_gemini_ok = False
 if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
+    try:
+        genai.configure(api_key=GEMINI_KEY)
+        _gemini_ok = True
+        print(f"✅ Gemini configured (key length: {len(GEMINI_KEY)})")
+    except Exception as _ge:
+        print(f"❌ Gemini configure error: {_ge}")
+else:
+    print("⚠ GEMINI_API_KEY not set — AI will use mock responses")
 
 app = FastAPI(title="SHIVA's Digital Evaluation API", version="4.0")
 app.add_middleware(
@@ -81,10 +90,12 @@ def audit(action, student_id, by, details={}):
 async def health():
     db_ok = db_exec("SELECT 1", fetch="one") is not None
     return {
-        "status":   "ok",
-        "database": "connected" if db_ok else "offline (fallback active)",
-        "gemini":   "configured" if GEMINI_KEY else "not configured (mock mode)",
-        "version":  "4.0"
+        "status":    "ok",
+        "version":   "4.1",
+        "database":  "connected" if db_ok else "offline (fallback active)",
+        "gemini":    "configured ✅" if _gemini_ok else "NOT configured ❌ — set GEMINI_API_KEY in Render environment",
+        "key_set":   bool(GEMINI_KEY),
+        "key_length": len(GEMINI_KEY) if GEMINI_KEY else 0,
     }
 
 # ═══════════════════════════════════════
@@ -538,7 +549,7 @@ async def get_scheme():
 
 @app.post("/run-ai-analysis")
 async def run_ai_analysis(student_id: str):
-    # Load PDFs — try in-memory cache first, then DB
+    # ── Load PDFs: in-memory cache first, then Supabase DB ──────────
     session = SESSIONS.get(student_id)
     if not session or not session.get("script_b64"):
         row = db_exec(
@@ -549,105 +560,119 @@ async def run_ai_analysis(student_id: str):
             session = dict(row)
             SESSIONS[student_id] = session
 
-    if session and session.get("script_b64") and GEMINI_KEY:
+    has_script = bool(session and session.get("script_b64"))
+
+    print(f"run_ai_analysis: student={student_id} | "
+          f"has_script={has_script} | gemini_ok={_gemini_ok} | key_len={len(GEMINI_KEY)}")
+
+    if has_script and _gemini_ok:
         try:
-            model        = genai.GenerativeModel("gemini-1.5-flash")
-            script_bytes = base64.b64decode(session["script_b64"])
-            parts        = []
-
-            # Always include the answer script
-            parts.append({"mime_type": "application/pdf", "data": script_bytes})
-
-            # Include scheme PDF only if NO structured scheme is active
-            # (structured prompt is more reliable than visual PDF reading)
             use_structured = bool(ACTIVE_SCHEME and ACTIVE_SCHEME.get("questions"))
 
-            if not use_structured:
-                if session.get("scheme_b64"):
-                    parts.insert(0, {"mime_type": "application/pdf",
-                                     "data": base64.b64decode(session["scheme_b64"])})
-                if session.get("qp_b64"):
-                    parts.insert(0, {"mime_type": "application/pdf",
-                                     "data": base64.b64decode(session["qp_b64"])})
-
-            # Build prompt
+            # Build text prompt
             if use_structured:
-                prompt = _build_structured_prompt(ACTIVE_SCHEME)
-                print(f"Using STRUCTURED scheme: {ACTIVE_SCHEME.get('exam_title')}")
+                prompt_text = _build_structured_prompt(ACTIVE_SCHEME)
+                print(f"STRUCTURED scheme: {ACTIVE_SCHEME.get('exam_title')}")
             else:
-                prompt = _build_pdf_fallback_prompt()
-                print("Using PDF-fallback prompt (no structured scheme active)")
+                prompt_text = _build_pdf_fallback_prompt()
+                print("PDF-fallback prompt (no structured scheme)")
 
-            parts.insert(0, prompt)
+            # Build content list — correct format for Gemini multimodal:
+            # text string + inline_data dicts (base64 already, no decode needed)
+            content = [prompt_text]
 
-            response = model.generate_content(parts)
-            raw      = response.text.strip()
-            # Strip markdown fences if present
-            raw = raw.replace("```json","").replace("```","").strip()
-            # Sometimes Gemini prepends a sentence — find the first {
-            brace = raw.find("{")
-            if brace > 0: raw = raw[brace:]
-            result = json.loads(raw)
-            result = _normalise_ai_result(result, ACTIVE_SCHEME)
+            if not use_structured and session.get("scheme_b64"):
+                content.append({"inline_data": {
+                    "mime_type": "application/pdf",
+                    "data": session["scheme_b64"]   # already base64 string from DB
+                }})
+            if not use_structured and session.get("qp_b64"):
+                content.append({"inline_data": {
+                    "mime_type": "application/pdf",
+                    "data": session["qp_b64"]
+                }})
+            # Answer script always last
+            content.append({"inline_data": {
+                "mime_type": "application/pdf",
+                "data": session["script_b64"]
+            }})
 
-            _save_eval(student_id, "AI", _marks_from_result(result),
-                       ai_feedback=result,
-                       ai_confidence=result.get("overall_confidence"),
-                       htr_text=result.get("htr_text",""))
-            return {"status":"success","ai_eval":result,"source":"gemini",
-                    "scheme_used": "structured" if use_structured else "pdf"}
+            result = None
+            last_error = ""
+            for model_name in ["gemini-1.5-flash", "gemini-2.0-flash",
+                                "gemini-1.5-flash-latest", "gemini-1.5-pro"]:
+                try:
+                    print(f"Trying {model_name}…")
+                    model    = genai.GenerativeModel(model_name)
+                    response = model.generate_content(content)
+                    raw = response.text.strip()
+                    raw = raw.replace("```json","").replace("```","").strip()
+                    brace = raw.find("{")
+                    if brace > 0: raw = raw[brace:]
+                    result = json.loads(raw)
+                    result = _normalise_ai_result(result, ACTIVE_SCHEME)
+                    print(f"✅ Success with {model_name}")
+                    break
+                except json.JSONDecodeError as je:
+                    last_error = f"JSON error: {je}"
+                    print(f"{model_name} JSON error: {je}")
+                    continue
+                except Exception as me:
+                    last_error = f"{type(me).__name__}: {me}"
+                    print(f"{model_name} error: {last_error}")
+                    continue
+
+            if result:
+                _save_eval(student_id, "AI", _marks_from_result(result),
+                           ai_feedback=result,
+                           ai_confidence=result.get("overall_confidence"),
+                           htr_text=result.get("htr_text",""))
+                return {"status":"success","ai_eval":result,"source":"gemini",
+                        "scheme_used":"structured" if use_structured else "pdf"}
+            else:
+                print(f"❌ All models failed. Last error: {last_error}")
 
         except Exception as e:
-            print(f"Gemini error: {e}")
+            print(f"❌ Outer error: {type(e).__name__}: {e}")
             import traceback; traceback.print_exc()
 
-    # Mock fallback — uses active scheme structure if available
+    # ── Mock fallback ──────────────────────────────────────────────
+    reason = ("no_script" if not has_script
+              else "no_api_key" if not _gemini_ok
+              else "gemini_error")
+    print(f"Using mock (reason={reason})")
+
     if ACTIVE_SCHEME and ACTIVE_SCHEME.get("questions"):
-        mock_qs = {}
-        total   = 0.0
-        max_t   = float(ACTIVE_SCHEME.get("total_marks", 10))
+        mock_qs = {}; total = 0.0
+        max_t = float(ACTIVE_SCHEME.get("total_marks", 10))
         for q in ACTIVE_SCHEME["questions"]:
-            for p in q.get("parts",[]):
-                key    = p.get("key","q1a")
-                maxM   = float(p.get("marks",5))
-                awarded= round(maxM * 0.80, 1)   # 80% mock score
-                total += awarded
-                mock_qs[key] = {
-                    "marks": awarded, "max": maxM,
-                    "feedback":    f"Adequate response for {p.get('label','?')} — key concepts present.",
-                    "strengths":   ["Correct approach identified","Working shown"],
-                    "weaknesses":  ["Some steps missing","Conclusion not stated"],
-                    "suggestions": ["Complete all derivation steps","State final answer clearly"]
-                }
-        mock = {
-            "questions": mock_qs,
-            "total": round(total, 1),
-            "max_total": max_t,
-            "overall_confidence": 0.85,
-            "choice_conflict": False,
-            "htr_text": "Mock evaluation — Gemini API not available or script not uploaded.",
-            "general_feedback": "Mock result (backend AI unavailable). Marks awarded at 80% of maximum per question."
-        }
+            for p in q.get("parts", []):
+                key = p.get("key","q1a"); maxM = float(p.get("marks",5))
+                awarded = round(maxM * 0.80, 1); total += awarded
+                mock_qs[key] = {"marks":awarded,"max":maxM,
+                    "feedback":f"Mock for {p.get('label','?')}",
+                    "strengths":["Working shown"],"weaknesses":["Mock only"],
+                    "suggestions":["Set GEMINI_API_KEY on Render"]}
+        mock = {"questions":mock_qs,"total":round(total,1),"max_total":max_t,
+                "overall_confidence":0.5,"choice_conflict":False,
+                "htr_text":f"Mock — reason: {reason}",
+                "general_feedback":f"Mock result. reason={reason}. Check /health endpoint."}
     else:
         mock = {
-            "questions": {
-                "q1a": {"marks":4.5,"max":5,"feedback":"Strong conceptual understanding.",
-                        "strengths":["Correct formula","Units correct","Working shown"],
-                        "weaknesses":["Rounding not shown"],"suggestions":["Show rounding step"]},
-                "q1b": {"marks":3.5,"max":5,"feedback":"Correct approach, derivation incomplete.",
-                        "strengths":["Method correct","3 steps correct"],
-                        "weaknesses":["Last 2 steps missing","No conclusion"],
-                        "suggestions":["Complete derivation","Write conclusion"]}
+            "questions":{
+                "q1a":{"marks":4.5,"max":5,"feedback":"Mock","strengths":["Working shown"],
+                       "weaknesses":["Mock only"],"suggestions":["Set GEMINI_API_KEY"]},
+                "q1b":{"marks":3.5,"max":5,"feedback":"Mock","strengths":["Method shown"],
+                       "weaknesses":["Mock only"],"suggestions":["Upload answer script"]}
             },
-            "total":8.0,"max_total":10,"overall_confidence":0.88,"choice_conflict":False,
-            "htr_text":"Q1(a): F=ma, m=5kg, a=3m/s², F=15N. Q1(b): E=½mv²+mgh...",
-            "general_feedback":"Solid understanding. Q1(b) needs complete derivations."
+            "total":8.0,"max_total":10,"overall_confidence":0.5,"choice_conflict":False,
+            "htr_text":f"Mock — reason: {reason}",
+            "general_feedback":f"Mock. Visit /health to diagnose. reason={reason}"
         }
 
-    _save_eval(student_id, "AI", _marks_from_result(mock),
-               ai_feedback=mock, ai_confidence=mock["overall_confidence"],
-               htr_text=mock["htr_text"])
-    return {"status":"success","ai_eval":mock,"source":"mock"}
+    _save_eval(student_id,"AI",_marks_from_result(mock),
+               ai_feedback=mock,ai_confidence=0.5,htr_text=mock["htr_text"])
+    return {"status":"success","ai_eval":mock,"source":"mock","reason":reason}
 
 def _normalise_ai_result(result: dict, scheme: dict = None) -> dict:
     """Ensure result has a 'questions' dict. Fill in max marks from scheme if missing."""
